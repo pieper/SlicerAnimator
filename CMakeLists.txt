@@ -10,7 +10,7 @@ set(EXTENSION_CONTRIBUTORS "Steve Pieper (Isomics, Inc.)")
 set(EXTENSION_DESCRIPTION "This is a high-level animation interface that operates on top of the Sequences and Screen Capture interfaces.")
 set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/Animator.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.example.com/Slicer/Extensions/Animator/Screenshots/1.png")
-set(EXTENSION_DEPENDS "NA") # Specified as a space separated string, a list or 'NA' if any
+set(EXTENSION_DEPENDS "Sequences") # Specified as a space separated string, a list or 'NA' if any
 
 #-----------------------------------------------------------------------------
 # Extension dependencies

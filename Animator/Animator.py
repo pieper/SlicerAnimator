@@ -1,8 +1,66 @@
+import json
 import os
 import unittest
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
+
+#
+# action classes
+#
+class AnimatorAction(object):
+  """Superclass for actions to be animated."""
+  def __init__(self):
+    self.name = "Action"
+    self.startTime = 0 # in seconds from start of script
+    self.endTime = 0
+
+class TranslationAction(AnimatorAction):
+  """Defines an animation of a transform"""
+  def __init__(self):
+    super(TranslationAction,self).__init__()
+    self.name = "TranslationAction"
+
+  def react(self, action, scriptTime):
+    startTransform = slicer.mrmlScene.GetNodeByID(action['startTransformID'])
+    endTransform = slicer.mrmlScene.GetNodeByID(action['endTransformID'])
+    proxyTransform = slicer.mrmlScene.GetNodeByID(action['proxyTransformID'])
+    if scriptTime <= action['startTime']:
+      matrix = vtk.vtkMatrix4x4()
+      startTransform.GetMatrixTransformFromParent(matrix)
+      proxyTransform.SetMatrixTransformFromParent(matrix)
+    elif scriptTime >= action['endTime']:
+      matrix = vtk.vtkMatrix4x4()
+      endTransform.GetMatrixTransformFromParent(matrix)
+      proxyTransform.SetMatrixTransformFromParent(matrix)
+    else:
+      actionTime = scriptTime - action['startTime']
+      duration = action['endTime'] - action['startTime']
+      fraction = actionTime / duration
+      startMatrix = vtk.vtkMatrix4x4()
+      startTransform.GetMatrixTransformFromParent(startMatrix)
+      endMatrix = vtk.vtkMatrix4x4()
+      endTransform.GetMatrixTransformFromParent(endMatrix)
+      proxyMatrix = vtk.vtkMatrix4x4()
+      proxyMatrix.DeepCopy(startMatrix)
+      for i in range(3):
+        start = startMatrix.GetElement(i,3)
+        end = endMatrix.GetElement(i,3)
+        delta = fraction * (end-start)
+        # TODO: add interpolation and ease in/out options
+        proxyMatrix.SetElement(i,3, start + delta)
+      proxyTransform.SetMatrixTransformFromParent(proxyMatrix)
+
+# add an module-specific dict for any module other to add animator plugins.
+# these must be subclasses (or duck types) of the
+# AnimatorAction class below.  Dict keys are action types
+# and values are classes
+try:
+  slicer.modules.animatorActionPlugins
+except AttributeError:
+  slicer.modules.animatorActionPlugins = {}
+slicer.modules.animatorActionPlugins['TranslationAction'] = TranslationAction
+
 
 #
 # Animator
@@ -16,18 +74,18 @@ class Animator(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "Animator" # TODO make this more human readable by adding spaces
-    self.parent.categories = ["Examples"]
+    self.parent.categories = ["Wizards"]
     self.parent.dependencies = []
-    self.parent.contributors = ["John Doe (AnyWare Corp.)"] # replace with "Firstname Lastname (Organization)"
+    self.parent.contributors = ["Steve Pieper (Isomics, Inc.)"] # replace with "Firstname Lastname (Organization)"
     self.parent.helpText = """
-This is an example of scripted loadable module bundled in an extension.
-It performs a simple thresholding on the input volume and optionally captures a screenshot.
+A high-level animation interface that operates on top of the Sequences and Screen Capture interfaces.
 """
     self.parent.helpText += self.getDefaultModuleDocumentationLink()
     self.parent.acknowledgementText = """
 This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc.
 and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
 """ # replace with organization, grant and thanks.
+
 
 #
 # AnimatorWidget
@@ -38,8 +96,15 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
+
+    # tracks the modified event observer on the currently
+    # selected sequence browser node
+    self.sequenceBrowserObserverRecord = None
+
+    self.logic = AnimatorLogic()
 
     # Instantiate and connect widgets ...
 
@@ -47,7 +112,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     # Parameters Area
     #
     parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    parametersCollapsibleButton.text = "Parameters"
+    parametersCollapsibleButton.text = "Animation Parameters"
     self.layout.addWidget(parametersCollapsibleButton)
 
     # Layout within the dummy collapsible button
@@ -56,82 +121,62 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     #
     # input volume selector
     #
-    self.inputSelector = slicer.qMRMLNodeComboBox()
-    self.inputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
-    self.inputSelector.selectNodeUponCreation = True
-    self.inputSelector.addEnabled = False
-    self.inputSelector.removeEnabled = False
-    self.inputSelector.noneEnabled = False
-    self.inputSelector.showHidden = False
-    self.inputSelector.showChildNodeTypes = False
-    self.inputSelector.setMRMLScene( slicer.mrmlScene )
-    self.inputSelector.setToolTip( "Pick the input to the algorithm." )
-    parametersFormLayout.addRow("Input Volume: ", self.inputSelector)
+    self.animationSelector = slicer.qMRMLNodeComboBox()
+    self.animationSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
+    self.animationSelector.selectNodeUponCreation = True
+    self.animationSelector.addEnabled = True
+    self.animationSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "Animation")
+    self.animationSelector.baseName = "Animation"
+    self.animationSelector.removeEnabled = True
+    self.animationSelector.noneEnabled = True
+    self.animationSelector.showHidden = True
+    self.animationSelector.showChildNodeTypes = False
+    self.animationSelector.setMRMLScene( slicer.mrmlScene )
+    self.animationSelector.setToolTip( "Pick the animation description." )
+    parametersFormLayout.addRow("Animation Node: ", self.animationSelector)
 
-    #
-    # output volume selector
-    #
-    self.outputSelector = slicer.qMRMLNodeComboBox()
-    self.outputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
-    self.outputSelector.selectNodeUponCreation = True
-    self.outputSelector.addEnabled = True
-    self.outputSelector.removeEnabled = True
-    self.outputSelector.noneEnabled = True
-    self.outputSelector.showHidden = False
-    self.outputSelector.showChildNodeTypes = False
-    self.outputSelector.setMRMLScene( slicer.mrmlScene )
-    self.outputSelector.setToolTip( "Pick the output to the algorithm." )
-    parametersFormLayout.addRow("Output Volume: ", self.outputSelector)
+    self.sequencePlay = slicer.qMRMLSequenceBrowserPlayWidget()
+    self.sequencePlay.setMRMLScene(slicer.mrmlScene)
+    self.sequenceSeek = slicer.qMRMLSequenceBrowserSeekWidget()
+    self.sequenceSeek.setMRMLScene(slicer.mrmlScene)
 
-    #
-    # threshold value
-    #
-    self.imageThresholdSliderWidget = ctk.ctkSliderWidget()
-    self.imageThresholdSliderWidget.singleStep = 0.1
-    self.imageThresholdSliderWidget.minimum = -100
-    self.imageThresholdSliderWidget.maximum = 100
-    self.imageThresholdSliderWidget.value = 0.5
-    self.imageThresholdSliderWidget.setToolTip("Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.")
-    parametersFormLayout.addRow("Image threshold", self.imageThresholdSliderWidget)
-
-    #
-    # check box to trigger taking screen shots for later use in tutorials
-    #
-    self.enableScreenshotsFlagCheckBox = qt.QCheckBox()
-    self.enableScreenshotsFlagCheckBox.checked = 0
-    self.enableScreenshotsFlagCheckBox.setToolTip("If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
-    parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
-
-    #
-    # Apply Button
-    #
-    self.applyButton = qt.QPushButton("Apply")
-    self.applyButton.toolTip = "Run the algorithm."
-    self.applyButton.enabled = False
-    parametersFormLayout.addRow(self.applyButton)
+    parametersFormLayout.addRow(self.sequencePlay)
+    parametersFormLayout.addRow(self.sequenceSeek)
 
     # connections
-    self.applyButton.connect('clicked(bool)', self.onApplyButton)
-    self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-    self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+    self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
 
     # Add vertical spacer
     self.layout.addStretch(1)
-
-    # Refresh Apply button state
-    self.onSelect()
 
   def cleanup(self):
     pass
 
   def onSelect(self):
-    self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
+    sequenceBrowserNode = None
+    sequenceNode = None
+    animationNode = self.animationSelector.currentNode()
+    if animationNode:
+      sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
+      sequenceBrowserNode = slicer.mrmlScene.GetNodeByID(sequenceBrowserNodeID)
+      sequenceNodeID = animationNode.GetAttribute('Animator.sequenceNodeID')
+      sequenceNode = slicer.mrmlScene.GetNodeByID(sequenceNodeID)
+      if self.sequenceBrowserObserverRecord:
+        object,tag = self.sequenceBrowserObserverRecord
+        object.RemoveObserver(tag)
 
-  def onApplyButton(self):
-    logic = AnimatorLogic()
-    enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
-    imageThreshold = self.imageThresholdSliderWidget.value
-    logic.run(self.inputSelector.currentNode(), self.outputSelector.currentNode(), imageThreshold, enableScreenshotsFlag)
+      def onBrowserModified(caller, event):
+        index = sequenceBrowserNode.GetSelectedItemNumber()
+        scriptTime = float(sequenceNode.GetNthIndexValue(index))
+        self.logic.react(animationNode, scriptTime)
+      tag = sequenceBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, onBrowserModified)
+      self.sequenceBrowserObserverRecord = (sequenceBrowserNode, tag)
+
+    self.sequencePlay.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+    self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+
+
+
 
 #
 # AnimatorLogic
@@ -147,55 +192,65 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def hasImageData(self,volumeNode):
-    """This is an example logic method that
-    returns true if the passed in volume
-    node has valid image data
+  def getScript(self, animationNode):
+    scriptJSON = animationNode.GetAttribute("Animation.script") or "{}"
+    script = json.loads(scriptJSON)
+    return(script)
+
+  def setScript(self, animationNode, script):
+    scriptJSON = json.dumps(script)
+    animationNode.SetAttribute("Animation.script", scriptJSON)
+
+  def getActions(self, animationNode):
+    script = self.getScript(animationNode)
+    actions = script['actions'] if hasattr(script, "actions") else []
+    return(actions)
+
+  def addAction(self, animationNode, action):
+    """Add an action to the script """
+    script = self.getScript(animationNode)
+    actions = self.getActions(animationNode)
+    actions.append(action)
+    script['actions'] = actions
+    self.setScript(animationNode, script)
+
+  def compileScript(self, animationNode, sequenceBrowserNode=None):
+    """Convert the node's script into sequences and a sequence browser node.
+       TODO: Replace the passed sequenceBrowserNode if given.
+       Returns the sequenceBrowserNode.
     """
-    if not volumeNode:
-      logging.debug('hasImageData failed: no volume node')
-      return False
-    if volumeNode.GetImageData() is None:
-      logging.debug('hasImageData failed: no image data in volume node')
-      return False
-    return True
+    sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceBrowserNode')
+    sequenceBrowserNode.SetName(animationNode.GetName() + "-Browser")
 
-  def isValidInputOutputData(self, inputVolumeNode, outputVolumeNode):
-    """Validates if the output is not the same as input
-    """
-    if not inputVolumeNode:
-      logging.debug('isValidInputOutputData failed: no input volume node defined')
-      return False
-    if not outputVolumeNode:
-      logging.debug('isValidInputOutputData failed: no output volume node defined')
-      return False
-    if inputVolumeNode.GetID()==outputVolumeNode.GetID():
-      logging.debug('isValidInputOutputData failed: input and output volume is the same. Create a new volume for output to avoid this error.')
-      return False
-    return True
+    sequenceNodes = {}
+    script = self.getScript(animationNode)
+    actions = script['actions']
+    endTime = 0
+    for action in actions:
+      endTime = max(endTime, action['endTime'])
 
-  def run(self, inputVolume, outputVolume, imageThreshold, enableScreenshots=0):
-    """
-    Run the actual algorithm
-    """
+    sequenceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceNode')
+    sequenceNode.SetIndexType(sequenceNode.NumericIndex)
+    sequenceNode.SetName(animationNode.GetName() + "-TimingSequence")
+    sequenceBrowserNode.AddSynchronizedSequenceNode(sequenceNode)
 
-    if not self.isValidInputOutputData(inputVolume, outputVolume):
-      slicer.util.errorDisplay('Input volume is the same as output volume. Choose a different output volume.')
-      return False
+    steps = script['fps'] * endTime
+    for step in range(steps):
+      scriptTime = 1. * step / steps
+      timePointDataNode = slicer.vtkMRMLScriptedModuleNode()
+      sequenceNode.SetDataNodeAtValue(timePointDataNode, str(scriptTime))
 
-    logging.info('Processing started')
+    return(sequenceBrowserNode)
 
-    # Compute the thresholded output volume using the Threshold Scalar Volume CLI module
-    cliParams = {'InputVolume': inputVolume.GetID(), 'OutputVolume': outputVolume.GetID(), 'ThresholdValue' : imageThreshold, 'ThresholdType' : 'Above'}
-    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True)
 
-    # Capture screenshot
-    if enableScreenshots:
-      self.takeScreenshot('AnimatorTest-Start','MyScreenshot',-1)
+  def react(self, animationNode, scriptTime):
+    """Give each action in the script a chance to react to the current script time"""
+    script = self.getScript(animationNode)
+    actions = script['actions']
+    for action in actions:
+      actionInstance = slicer.modules.animatorActionPlugins[action['class']]()
+      actionInstance.react(action, scriptTime)
 
-    logging.info('Processing completed')
-
-    return True
 
 
 class AnimatorTest(ScriptedLoadableModuleTest):
@@ -228,18 +283,66 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     your test should break so they know that the feature is needed.
     """
 
-    self.delayDisplay("Starting the test")
+    self.delayDisplay("Starting the test", 10)
     #
     # first, get some data
     #
     import SampleData
-    SampleData.downloadFromURL(
-      nodeNames='FA',
-      fileNames='FA.nrrd',
-      uris='http://slicer.kitware.com/midas3/download?items=5767')
-    self.delayDisplay('Finished with download and loading')
+    mrHead = SampleData.downloadSample('MRHead')
+    slicer.util.delayDisplay("Head downloaded...",1)
 
-    volumeNode = slicer.util.getNode(pattern="FA")
+    animationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScriptedModuleNode')
+    animationNode.SetName('SelfTest Animation')
+    animationNode.SetAttribute('ModuleName', 'Animation')
+
     logic = AnimatorLogic()
-    self.assertIsNotNone( logic.hasImageData(volumeNode) )
+
+    script = {}
+    script['title'] = "SelfTest Script"
+    script['duration'] = 5 # in seconds
+    script['fps'] = 30
+    logic.setScript(animationNode, script)
+
+    startTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    startTransform.SetName('Start Transform')
+    endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    endTransform.SetName('End Transform')
+    proxyTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    proxyTransform.SetName('Proxy Transform')
+
+    matrix = vtk.vtkMatrix4x4()
+    matrix.SetElement(0,3, 10)
+    matrix.SetElement(1,3, 5)
+    matrix.SetElement(2,3, 15)
+    endTransform.SetMatrixTransformFromParent(matrix)
+
+    mrHead.SetAndObserveTransformNodeID(proxyTransform.GetID())
+
+    action = {
+      'name': 'SelfTest Translation',
+      'class': 'TranslationAction',
+      'id': 'transform1',
+      'startTime': 0,
+      'endTime': 3,
+      'interpolation': 'linear',
+      'startTransformID': startTransform.GetID(),
+      'endTransformID': endTransform.GetID(),
+      'proxyTransformID': proxyTransform.GetID(),
+    }
+
+    logic.addAction(animationNode, action)
+
+    sequenceBrowserNode = logic.compileScript(animationNode)
+
+    sequenceNodes = vtk.vtkCollection()
+    sequenceBrowserNode.GetSynchronizedSequenceNodes(sequenceNodes, True) # include master
+    sequenceNode = sequenceNodes.GetItemAsObject(0)
+
+    animationNode.SetAttribute('Animator.sequenceBrowserNodeID', sequenceBrowserNode.GetID())
+    animationNode.SetAttribute('Animator.sequenceNodeID', sequenceNode.GetID())
+
+    slicer.modules.AnimatorWidget.animationSelector.setCurrentNode(animationNode)
+
+    sequenceBrowserNode.SetPlaybackActive(True)
+
     self.delayDisplay('Test passed!')
