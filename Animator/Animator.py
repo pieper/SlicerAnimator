@@ -51,6 +51,28 @@ class TranslationAction(AnimatorAction):
         proxyMatrix.SetElement(i,3, start + delta)
       proxyTransform.SetMatrixTransformFromParent(proxyMatrix)
 
+class CameraRotationAction(AnimatorAction):
+  """Defines an animation of a transform"""
+  def __init__(self):
+    super(CameraRotationAction,self).__init__()
+    self.name = "CameraRotationAction"
+
+  def react(self, action, scriptTime):
+    referenceCamera = slicer.mrmlScene.GetNodeByID(action['referenceCameraID'])
+    targetCamera = slicer.mrmlScene.GetNodeByID(action['targetCameraID'])
+
+    targetCamera.GetCamera().DeepCopy(referenceCamera.GetCamera())
+    if scriptTime <= action['startTime']:
+      return
+    else:
+      actionTime = scriptTime - action['startTime']
+      if actionTime > action['endTime']:
+        actionTime = action['endTime'] # clamp to rotation at end
+      angle = actionTime * action['degreesPerSecond']
+      targetCamera.GetCamera().Azimuth(angle)
+      targetCamera.GetCamera().OrthogonalizeViewUp()
+      # TODO: this->Renderer->UpdateLightsGeometryToFollowCamera()
+
 # add an module-specific dict for any module other to add animator plugins.
 # these must be subclasses (or duck types) of the
 # AnimatorAction class below.  Dict keys are action types
@@ -60,6 +82,7 @@ try:
 except AttributeError:
   slicer.modules.animatorActionPlugins = {}
 slicer.modules.animatorActionPlugins['TranslationAction'] = TranslationAction
+slicer.modules.animatorActionPlugins['CameraRotationAction'] = CameraRotationAction
 
 
 #
@@ -176,8 +199,6 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
 
 
-
-
 #
 # AnimatorLogic
 #
@@ -203,7 +224,7 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
 
   def getActions(self, animationNode):
     script = self.getScript(animationNode)
-    actions = script['actions'] if hasattr(script, "actions") else []
+    actions = script['actions'] if "actions" in script else []
     return(actions)
 
   def addAction(self, animationNode, action):
@@ -222,21 +243,17 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceBrowserNode')
     sequenceBrowserNode.SetName(animationNode.GetName() + "-Browser")
 
-    sequenceNodes = {}
-    script = self.getScript(animationNode)
-    actions = script['actions']
-    endTime = 0
-    for action in actions:
-      endTime = max(endTime, action['endTime'])
 
     sequenceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceNode')
     sequenceNode.SetIndexType(sequenceNode.NumericIndex)
     sequenceNode.SetName(animationNode.GetName() + "-TimingSequence")
     sequenceBrowserNode.AddSynchronizedSequenceNode(sequenceNode)
 
-    steps = script['fps'] * endTime
-    for step in range(steps):
-      scriptTime = 1. * step / steps
+    script = self.getScript(animationNode)
+    frames = script['fps'] * script['duration']
+    spf = 1. / script['fps']
+    for frame in range(frames):
+      scriptTime = frame * spf
       timePointDataNode = slicer.vtkMRMLScriptedModuleNode()
       sequenceNode.SetDataNodeAtValue(timePointDataNode, str(scriptTime))
 
@@ -285,12 +302,24 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     self.delayDisplay("Starting the test", 10)
     #
-    # first, get some data
+    # first, get some data and make it visible
     #
     import SampleData
     mrHead = SampleData.downloadSample('MRHead')
-    slicer.util.delayDisplay("Head downloaded...",1)
+    slicer.util.delayDisplay("Head downloaded...",10)
 
+    slicer.util.mainWindow().moduleSelector().selectModule('VolumeRendering')
+    volumeRenderingWidgetRep = slicer.modules.volumerendering.widgetRepresentation()
+    volumeRenderingWidgetRep.setMRMLVolumeNode(mrHead)
+
+    volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
+    volumeRenderingNode.SetVisibility(1)
+
+    self.delayDisplay('Volume rendering on')
+
+    #
+    # set up an animation
+    #
     animationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScriptedModuleNode')
     animationNode.SetName('SelfTest Animation')
     animationNode.SetAttribute('ModuleName', 'Animation')
@@ -303,6 +332,9 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     script['fps'] = 30
     logic.setScript(animationNode, script)
 
+    #
+    # set up a translation action
+    #
     startTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     startTransform.SetName('Start Transform')
     endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
@@ -318,10 +350,10 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     mrHead.SetAndObserveTransformNodeID(proxyTransform.GetID())
 
-    action = {
+    translationAction = {
       'name': 'SelfTest Translation',
       'class': 'TranslationAction',
-      'id': 'transform1',
+      'id': 'translation1',
       'startTime': 0,
       'endTime': 3,
       'interpolation': 'linear',
@@ -330,8 +362,34 @@ class AnimatorTest(ScriptedLoadableModuleTest):
       'proxyTransformID': proxyTransform.GetID(),
     }
 
-    logic.addAction(animationNode, action)
+    logic.addAction(animationNode, translationAction)
 
+    #
+    # set up a camera rotation action
+    #
+    layoutManager = slicer.app.layoutManager()
+    threeDView = layoutManager.threeDWidget(0).threeDView()
+    targetCamera = threeDView.interactorStyle().GetCameraNode()
+    referenceCamera = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLCameraNode')
+    referenceCamera.SetName('referenceCamera')
+    referenceCamera.GetCamera().DeepCopy(targetCamera.GetCamera())
+    cameraRotationAction = {
+      'name': 'SelfTest CameraRotation',
+      'class': 'CameraRotationAction',
+      'id': 'cameraRotation1',
+      'startTime': 1,
+      'endTime': 5,
+      'interpolation': 'linear',
+      'referenceCameraID': referenceCamera.GetID(),
+      'targetCameraID': targetCamera.GetID(),
+      'degreesPerSecond': 45,
+    }
+
+    logic.addAction(animationNode, cameraRotationAction)
+
+    #
+    # set up the animation and turn it on
+    #
     sequenceBrowserNode = logic.compileScript(animationNode)
 
     sequenceNodes = vtk.vtkCollection()
@@ -345,4 +403,4 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     sequenceBrowserNode.SetPlaybackActive(True)
 
-    self.delayDisplay('Test passed!')
+    self.delayDisplay('Test passed!', 10)
