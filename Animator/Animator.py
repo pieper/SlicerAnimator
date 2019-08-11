@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import unittest
 import vtk, qt, ctk, slicer
@@ -24,15 +25,15 @@ class TranslationAction(AnimatorAction):
   def react(self, action, scriptTime):
     startTransform = slicer.mrmlScene.GetNodeByID(action['startTransformID'])
     endTransform = slicer.mrmlScene.GetNodeByID(action['endTransformID'])
-    proxyTransform = slicer.mrmlScene.GetNodeByID(action['proxyTransformID'])
+    targetTransform = slicer.mrmlScene.GetNodeByID(action['targetTransformID'])
     if scriptTime <= action['startTime']:
       matrix = vtk.vtkMatrix4x4()
       startTransform.GetMatrixTransformFromParent(matrix)
-      proxyTransform.SetMatrixTransformFromParent(matrix)
+      targetTransform.SetMatrixTransformFromParent(matrix)
     elif scriptTime >= action['endTime']:
       matrix = vtk.vtkMatrix4x4()
       endTransform.GetMatrixTransformFromParent(matrix)
-      proxyTransform.SetMatrixTransformFromParent(matrix)
+      targetTransform.SetMatrixTransformFromParent(matrix)
     else:
       actionTime = scriptTime - action['startTime']
       duration = action['endTime'] - action['startTime']
@@ -41,15 +42,15 @@ class TranslationAction(AnimatorAction):
       startTransform.GetMatrixTransformFromParent(startMatrix)
       endMatrix = vtk.vtkMatrix4x4()
       endTransform.GetMatrixTransformFromParent(endMatrix)
-      proxyMatrix = vtk.vtkMatrix4x4()
-      proxyMatrix.DeepCopy(startMatrix)
+      targetMatrix = vtk.vtkMatrix4x4()
+      targetMatrix.DeepCopy(startMatrix)
       for i in range(3):
         start = startMatrix.GetElement(i,3)
         end = endMatrix.GetElement(i,3)
         delta = fraction * (end-start)
         # TODO: add interpolation and ease in/out options
-        proxyMatrix.SetElement(i,3, start + delta)
-      proxyTransform.SetMatrixTransformFromParent(proxyMatrix)
+        targetMatrix.SetElement(i,3, start + delta)
+      targetTransform.SetMatrixTransformFromParent(targetMatrix)
 
 class CameraRotationAction(AnimatorAction):
   """Defines an animation of a transform"""
@@ -73,6 +74,96 @@ class CameraRotationAction(AnimatorAction):
       targetCamera.GetCamera().OrthogonalizeViewUp()
       # TODO: this->Renderer->UpdateLightsGeometryToFollowCamera()
 
+class ROIAction(AnimatorAction):
+  """Defines an animation of an roi (e.g. for volume cropping)"""
+  def __init__(self):
+    super(ROIAction,self).__init__()
+    self.name = "ROIAction"
+
+  def react(self, action, scriptTime):
+    startROI = slicer.mrmlScene.GetNodeByID(action['startROIID'])
+    endROI = slicer.mrmlScene.GetNodeByID(action['endROIID'])
+    targetROI = slicer.mrmlScene.GetNodeByID(action['targetROIID'])
+    start = [0.,]*3
+    end = [0.,]*3
+    target = [0,]*3
+    if scriptTime <= action['startTime']:
+      startROI.GetXYZ(start)
+      targetROI.SetXYZ(start)
+      startROI.GetRadiusXYZ(start)
+      targetROI.SetRadiusXYZ(start)
+    elif scriptTime >= action['endTime']:
+      endROI.GetXYZ(end)
+      targetROI.SetXYZ(end)
+      endROI.GetRadiusXYZ(end)
+      targetROI.SetRadiusXYZ(end)
+    else:
+      actionTime = scriptTime - action['startTime']
+      duration = action['endTime'] - action['startTime']
+      fraction = actionTime / duration
+      startROI.GetXYZ(start)
+      endROI.GetXYZ(end)
+      for i in range(3):
+        target[i] = start[i] + fraction * (end[i]-start[i])
+      targetROI.SetXYZ(target)
+      startROI.GetRadiusXYZ(start)
+      endROI.GetRadiusXYZ(end)
+      for i in range(3):
+        target[i] = start[i] + fraction * (end[i]-start[i])
+      targetROI.SetRadiusXYZ(target)
+
+class VolumePropertyAction(AnimatorAction):
+  """Defines an animation of an roi (e.g. for volume cropping)"""
+  def __init__(self):
+    super(VolumePropertyAction,self).__init__()
+    self.name = "VolumePropertyAction"
+
+  def react(self, action, scriptTime):
+    startVolumeProperty = slicer.mrmlScene.GetNodeByID(action['startVolumePropertyID'])
+    endVolumeProperty = slicer.mrmlScene.GetNodeByID(action['endVolumePropertyID'])
+    targetVolumeProperty = slicer.mrmlScene.GetNodeByID(action['targetVolumePropertyID'])
+    if scriptTime <= action['startTime']:
+      targetVolumeProperty.CopyParameterSet(startVolumeProperty)
+    elif scriptTime >= action['endTime']:
+      targetVolumeProperty.CopyParameterSet(endVolumeProperty)
+    else:
+      actionTime = scriptTime - action['startTime']
+      duration = action['endTime'] - action['startTime']
+      fraction = actionTime / duration
+      disabledModify = targetVolumeProperty.StartModify()
+      targetVolumeProperty.CopyParameterSet(startVolumeProperty)
+      # interpolate the scalar opacity
+      startScalarOpacity = startVolumeProperty.GetScalarOpacity()
+      endScalarOpacity = endVolumeProperty.GetScalarOpacity()
+      targetScalarOpacity = targetVolumeProperty.GetScalarOpacity()
+      nodeElementCount = 4
+      startValue = [0.,]*nodeElementCount
+      endValue = [0.,]*nodeElementCount
+      targetValue = [0.,]*nodeElementCount
+      for index in range(startScalarOpacity.GetSize()):
+        startScalarOpacity.GetNodeValue(index, startValue)
+        endScalarOpacity.GetNodeValue(index, endValue)
+        for i in range(nodeElementCount):
+          targetValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
+        targetScalarOpacity.SetNodeValue(index, targetValue)
+      # interpolate the color transfer
+      startColor = startVolumeProperty.GetColor()
+      endColor = endVolumeProperty.GetColor()
+      targetColor = targetVolumeProperty.GetColor()
+      nodeElementCount = 6
+      startValue = [0.,]*nodeElementCount
+      endValue = [0.,]*nodeElementCount
+      targetValue = [0.,]*nodeElementCount
+      for index in range(startColor.GetSize()):
+        startColor.GetNodeValue(index, startValue)
+        endColor.GetNodeValue(index, endValue)
+        for i in range(nodeElementCount):
+          targetValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
+        targetColor.SetNodeValue(index, targetValue)
+      targetVolumeProperty.EndModify(disabledModify)
+
+
+
 # add an module-specific dict for any module other to add animator plugins.
 # these must be subclasses (or duck types) of the
 # AnimatorAction class below.  Dict keys are action types
@@ -83,6 +174,8 @@ except AttributeError:
   slicer.modules.animatorActionPlugins = {}
 slicer.modules.animatorActionPlugins['TranslationAction'] = TranslationAction
 slicer.modules.animatorActionPlugins['CameraRotationAction'] = CameraRotationAction
+slicer.modules.animatorActionPlugins['ROIAction'] = ROIAction
+slicer.modules.animatorActionPlugins['VolumePropertyAction'] = VolumePropertyAction
 
 
 #
@@ -96,7 +189,7 @@ class Animator(ScriptedLoadableModule):
 
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = "Animator" # TODO make this more human readable by adding spaces
+    self.parent.title = "Animator"
     self.parent.categories = ["Wizards"]
     self.parent.dependencies = []
     self.parent.contributors = ["Steve Pieper (Isomics, Inc.)"] # replace with "Firstname Lastname (Organization)"
@@ -235,30 +328,30 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     script['actions'] = actions
     self.setScript(animationNode, script)
 
-  def compileScript(self, animationNode, sequenceBrowserNode=None):
+  def compileScript(self, animationNode):
     """Convert the node's script into sequences and a sequence browser node.
-       TODO: Replace the passed sequenceBrowserNode if given.
        Returns the sequenceBrowserNode.
     """
     sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceBrowserNode')
     sequenceBrowserNode.SetName(animationNode.GetName() + "-Browser")
-
 
     sequenceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceNode')
     sequenceNode.SetIndexType(sequenceNode.NumericIndex)
     sequenceNode.SetName(animationNode.GetName() + "-TimingSequence")
     sequenceBrowserNode.AddSynchronizedSequenceNode(sequenceNode)
 
+    # create on data node per frame of the script.
+    # these are used to synchronize the animation
+    # but don't hold any other data
     script = self.getScript(animationNode)
     frames = script['fps'] * script['duration']
     spf = 1. / script['fps']
-    for frame in range(frames):
+    for frame in range(math.ceil(frames)):
       scriptTime = frame * spf
       timePointDataNode = slicer.vtkMRMLScriptedModuleNode()
       sequenceNode.SetDataNodeAtValue(timePointDataNode, str(scriptTime))
 
     return(sequenceBrowserNode)
-
 
   def react(self, animationNode, scriptTime):
     """Give each action in the script a chance to react to the current script time"""
@@ -267,7 +360,6 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     for action in actions:
       actionInstance = slicer.modules.animatorActionPlugins[action['class']]()
       actionInstance.react(action, scriptTime)
-
 
 
 class AnimatorTest(ScriptedLoadableModuleTest):
@@ -314,6 +406,8 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
     volumeRenderingNode.SetVisibility(1)
+    volumeRenderingNode.SetShading(False)
+    slicer.util.mainWindow().moduleSelector().selectModule('Animator')
 
     self.delayDisplay('Volume rendering on')
 
@@ -328,7 +422,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     script = {}
     script['title'] = "SelfTest Script"
-    script['duration'] = 5 # in seconds
+    script['duration'] = 5.5 # in seconds
     script['fps'] = 30
     logic.setScript(animationNode, script)
 
@@ -339,8 +433,8 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     startTransform.SetName('Start Transform')
     endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     endTransform.SetName('End Transform')
-    proxyTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
-    proxyTransform.SetName('Proxy Transform')
+    targetTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    targetTransform.SetName('Animated Transform')
 
     matrix = vtk.vtkMatrix4x4()
     matrix.SetElement(0,3, 10)
@@ -348,18 +442,18 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     matrix.SetElement(2,3, 15)
     endTransform.SetMatrixTransformFromParent(matrix)
 
-    mrHead.SetAndObserveTransformNodeID(proxyTransform.GetID())
+    mrHead.SetAndObserveTransformNodeID(targetTransform.GetID())
 
     translationAction = {
       'name': 'SelfTest Translation',
       'class': 'TranslationAction',
       'id': 'translation1',
-      'startTime': 0,
-      'endTime': 3,
+      'startTime': 4,
+      'endTime': 5,
       'interpolation': 'linear',
       'startTransformID': startTransform.GetID(),
       'endTransformID': endTransform.GetID(),
-      'proxyTransformID': proxyTransform.GetID(),
+      'targetTransformID': targetTransform.GetID(),
     }
 
     logic.addAction(animationNode, translationAction)
@@ -377,15 +471,99 @@ class AnimatorTest(ScriptedLoadableModuleTest):
       'name': 'SelfTest CameraRotation',
       'class': 'CameraRotationAction',
       'id': 'cameraRotation1',
-      'startTime': 1,
-      'endTime': 5,
+      'startTime': .1,
+      'endTime': 4,
       'interpolation': 'linear',
       'referenceCameraID': referenceCamera.GetID(),
       'targetCameraID': targetCamera.GetID(),
-      'degreesPerSecond': 45,
+      'degreesPerSecond': 90,
     }
 
     logic.addAction(animationNode, cameraRotationAction)
+
+    #
+    # set up an ROI action
+    #
+    startROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
+    startROI.SetName('Start ROI')
+    endROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
+    endROI.SetName('End ROI')
+    for roi in [startROI, endROI]:
+      for index in range(roi.GetNumberOfDisplayNodes()):
+        roi.GetNthDisplayNode(index).SetVisibility(False)
+    targetROI = volumeRenderingNode.GetROINode()
+    volumeRenderingNode.SetCroppingEnabled(True)
+
+    start = [0.,]*3
+    targetROI.GetXYZ(start)
+    startROI.SetXYZ(start)
+    endROI.SetXYZ(start)
+    targetROI.GetRadiusXYZ(start)
+    startROI.SetRadiusXYZ(start)
+    end = [0.,]*3
+    for i in range(3):
+      end[i] = start[i] / 2.
+    endROI.SetRadiusXYZ(end)
+
+    roiAction = {
+      'name': 'SelfTest ROI',
+      'class': 'ROIAction',
+      'id': 'roi1',
+      'startTime': 1,
+      'endTime': 4,
+      'interpolation': 'linear',
+      'startROIID': startROI.GetID(),
+      'endROIID': endROI.GetID(),
+      'targetROIID': targetROI.GetID(),
+    }
+
+    logic.addAction(animationNode, roiAction)
+
+    #
+    # set up a volume property action
+    #
+    startVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
+    startVolumeProperty.SetName('Start VolumeProperty')
+    endVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
+    endVolumeProperty.SetName('End VolumeProperty')
+    targetVolumeProperty = volumeRenderingNode.GetVolumePropertyNode()
+
+    startVolumeProperty.CopyParameterSet(targetVolumeProperty)
+    endVolumeProperty.CopyParameterSet(targetVolumeProperty)
+
+    endScalarOpacity = endVolumeProperty.GetScalarOpacity()
+    nodeElementCount = 4
+    endValue = [0,]*nodeElementCount
+    endScalarOpacity.GetNodeValue(2, endValue)
+    endValue[0] = 250
+    endValue[1] = 0.25
+    endScalarOpacity.SetNodeValue(2, endValue)
+
+    endColor = endVolumeProperty.GetColor()
+    nodeElementCount = 6
+    endValue = [0.,]*nodeElementCount
+    endColor.GetNodeValue(5, endValue)
+    print(endColor)
+    print(endValue)
+    endValue[0] = 115.
+    endValue[1] = 1.
+    endValue[2] = 1.
+    endValue[3] = 1.
+    endColor.SetNodeValue(5, endValue)
+
+    volumePropertyAction = {
+      'name': 'SelfTest Volume Property',
+      'class': 'VolumePropertyAction',
+      'id': 'volumeProperty1',
+      'startTime': 0,
+      'endTime': 1,
+      'interpolation': 'linear',
+      'startVolumePropertyID': startVolumeProperty.GetID(),
+      'endVolumePropertyID': endVolumeProperty.GetID(),
+      'targetVolumePropertyID': targetVolumeProperty.GetID(),
+    }
+
+    logic.addAction(animationNode, volumePropertyAction)
 
     #
     # set up the animation and turn it on
