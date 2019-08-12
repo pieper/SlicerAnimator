@@ -256,8 +256,26 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     self.sequenceSeek = slicer.qMRMLSequenceBrowserSeekWidget()
     self.sequenceSeek.setMRMLScene(slicer.mrmlScene)
 
+    self.duration = ctk.ctkDoubleSpinBox()
+    self.duration.suffix = " seconds"
+    self.duration.decimals = 1
+    self.duration.minimum = 1
+    self.duration.value = 5
+
+    parametersFormLayout.addRow("Duration", self.duration)
     parametersFormLayout.addRow(self.sequencePlay)
     parametersFormLayout.addRow(self.sequenceSeek)
+
+    #
+    # Actions Area
+    #
+    actionsCollapsibleButton = ctk.ctkCollapsibleButton()
+    actionsCollapsibleButton.text = "Actions"
+    self.layout.addWidget(actionsCollapsibleButton)
+
+    # Layout within the dummy collapsible button
+    self.actionsFormLayout = qt.QFormLayout(actionsCollapsibleButton)
+
 
     # connections
     self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
@@ -271,6 +289,8 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   def onSelect(self):
     sequenceBrowserNode = None
     sequenceNode = None
+    self.actionsFormLayout.removeWidget(self.actionsFormLayout.itemAt(0))
+    self.animatorActionsGUI = None
     animationNode = self.animationSelector.currentNode()
     if animationNode:
       sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
@@ -288,9 +308,83 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       tag = sequenceBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, onBrowserModified)
       self.sequenceBrowserObserverRecord = (sequenceBrowserNode, tag)
 
+      self.animatorActionsGUI = AnimatorActionsGUI(animationNode)
+      self.actionsFormLayout.addRow(self.animatorActionsGUI.buildUI())
+
     self.sequencePlay.setMRMLSequenceBrowserNode(sequenceBrowserNode)
     self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
 
+class AnimatorActionsGUI(object):
+  """Manage the UI elements for animation script
+     Gets the script from the animationNode and
+     returns a QWidget.
+     Updates animation node script based on events from UI.
+
+     TODO: this is hard coded for now, but can be generalized
+     based on experience.
+  """
+  def __init__(self, animationNode):
+    self.animationNode = animationNode
+
+  def buildUI(self):
+    logic = AnimatorLogic()
+    script = logic.getScript(self.animationNode)
+    actions = logic.getActions(self.animationNode)
+    self.scrollArea = qt.QScrollArea()
+    self.widget = qt.QWidget(self.scrollArea)
+    self.scrollArea.widgetResizable = True
+    self.scrollArea.setVerticalScrollBarPolicy(qt.Qt.ScrollBarAsNeeded)
+    self.layout = qt.QFormLayout()
+    self.widget.setLayout(self.layout)
+    for action in actions:
+      editButton = qt.QPushButton(action['name'])
+      editButton.connect('clicked()', lambda action=action : self.onEdit(action))
+      self.layout.addRow(editButton)
+      duration = ctk.ctkDoubleRangeSlider()
+      duration.maximum = script['duration']
+      duration.minimumValue = action['startTime']
+      duration.maximumValue = action['endTime']
+      duration.orientation = qt.Qt.Horizontal
+      self.layout.addRow(duration)
+    return self.widget
+
+  def onEdit(self, action = {}):
+    dialog = qt.QDialog(slicer.util.mainWindow())
+    layout = qt.QFormLayout(dialog)
+
+    label = qt.QLabel(action['name'])
+    layout.addRow("Edit properties of:",  label )
+
+    # TODO: make UIs for each of the pre-defined action types
+
+    colorSelector = slicer.qMRMLColorTableComboBox()
+    colorSelector.nodeTypes = ["vtkMRMLColorNode"]
+    colorSelector.hideChildNodeTypes = ("vtkMRMLDiffusionTensorDisplayPropertiesNode", "vtkMRMLProceduralColorNode", "")
+    colorSelector.addEnabled = False
+    colorSelector.removeEnabled = False
+    colorSelector.noneEnabled = False
+    colorSelector.selectNodeUponCreation = True
+    colorSelector.showHidden = True
+    colorSelector.showChildNodeTypes = True
+    colorSelector.setMRMLScene( slicer.mrmlScene )
+    colorSelector.setToolTip( "Pick the table of structures you wish to edit" )
+    layout.addRow( colorSelector )
+
+    buttonBox = qt.QDialogButtonBox()
+    buttonBox.setStandardButtons(qt.QDialogButtonBox.Ok |
+                                      qt.QDialogButtonBox.Cancel)
+    layout.addRow(buttonBox)
+
+    buttonBox.button(qt.QDialogButtonBox.Ok).setToolTip("Use currently selected color node.")
+    buttonBox.button(qt.QDialogButtonBox.Cancel).setToolTip("Cancel current operation.")
+
+    buttonBox.connect("accepted()", lambda : self.accept(dialog))
+    buttonBox.connect("rejected()", dialog, "reject()")
+
+    dialog.exec_()
+
+  def accept(self, dialog):
+    print(dialog)
 
 #
 # AnimatorLogic
@@ -334,6 +428,7 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     """
     sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceBrowserNode')
     sequenceBrowserNode.SetName(animationNode.GetName() + "-Browser")
+    sequenceBrowserNode.SetPlaybackItemSkippingEnabled(False)
 
     sequenceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceNode')
     sequenceNode.SetIndexType(sequenceNode.NumericIndex)
@@ -445,7 +540,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     mrHead.SetAndObserveTransformNodeID(targetTransform.GetID())
 
     translationAction = {
-      'name': 'SelfTest Translation',
+      'name': 'Translation',
       'class': 'TranslationAction',
       'id': 'translation1',
       'startTime': 4,
@@ -468,7 +563,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     referenceCamera.SetName('referenceCamera')
     referenceCamera.GetCamera().DeepCopy(targetCamera.GetCamera())
     cameraRotationAction = {
-      'name': 'SelfTest CameraRotation',
+      'name': 'CameraRotation',
       'class': 'CameraRotationAction',
       'id': 'cameraRotation1',
       'startTime': .1,
@@ -506,7 +601,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     endROI.SetRadiusXYZ(end)
 
     roiAction = {
-      'name': 'SelfTest ROI',
+      'name': 'ROI',
       'class': 'ROIAction',
       'id': 'roi1',
       'startTime': 1,
@@ -552,7 +647,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     endColor.SetNodeValue(5, endValue)
 
     volumePropertyAction = {
-      'name': 'SelfTest Volume Property',
+      'name': 'Volume Property',
       'class': 'VolumePropertyAction',
       'id': 'volumeProperty1',
       'startTime': 0,
