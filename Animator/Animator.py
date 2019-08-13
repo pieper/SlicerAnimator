@@ -16,13 +16,19 @@ class AnimatorAction(object):
     self.startTime = 0 # in seconds from start of script
     self.endTime = 0
 
+  def act(self, action, scriptTime):
+    pass
+
+  def gui(self, action, layout):
+    pass
+
 class TranslationAction(AnimatorAction):
   """Defines an animation of a transform"""
   def __init__(self):
     super(TranslationAction,self).__init__()
     self.name = "TranslationAction"
 
-  def react(self, action, scriptTime):
+  def act(self, action, scriptTime):
     startTransform = slicer.mrmlScene.GetNodeByID(action['startTransformID'])
     endTransform = slicer.mrmlScene.GetNodeByID(action['endTransformID'])
     targetTransform = slicer.mrmlScene.GetNodeByID(action['targetTransformID'])
@@ -58,7 +64,7 @@ class CameraRotationAction(AnimatorAction):
     super(CameraRotationAction,self).__init__()
     self.name = "CameraRotationAction"
 
-  def react(self, action, scriptTime):
+  def act(self, action, scriptTime):
     referenceCamera = slicer.mrmlScene.GetNodeByID(action['referenceCameraID'])
     targetCamera = slicer.mrmlScene.GetNodeByID(action['targetCameraID'])
 
@@ -74,13 +80,56 @@ class CameraRotationAction(AnimatorAction):
       targetCamera.GetCamera().OrthogonalizeViewUp()
       # TODO: this->Renderer->UpdateLightsGeometryToFollowCamera()
 
+  def gui(self, action, layout):
+    super(CameraRotationAction,self).gui(action, layout)
+
+    self.referenceSelector = slicer.qMRMLNodeComboBox()
+    self.referenceSelector.nodeTypes = ["vtkMRMLCameraNode"]
+    self.referenceSelector.addEnabled = True
+    self.referenceSelector.renameEnabled = True
+    self.referenceSelector.removeEnabled = False
+    self.referenceSelector.noneEnabled = False
+    self.referenceSelector.selectNodeUponCreation = True
+    self.referenceSelector.showHidden = True
+    self.referenceSelector.showChildNodeTypes = True
+    self.referenceSelector.setMRMLScene( slicer.mrmlScene )
+    self.referenceSelector.setToolTip( "Pick the reference camera" )
+    self.referenceSelector.currentNodeID = action['referenceCameraID']
+    layout.addRow("Reference camera", self.referenceSelector)
+
+    self.targetSelector = slicer.qMRMLNodeComboBox()
+    self.targetSelector.nodeTypes = ["vtkMRMLCameraNode"]
+    self.targetSelector.addEnabled = True
+    self.targetSelector.renameEnabled = True
+    self.targetSelector.removeEnabled = False
+    self.targetSelector.noneEnabled = False
+    self.targetSelector.selectNodeUponCreation = True
+    self.targetSelector.showHidden = True
+    self.targetSelector.showChildNodeTypes = True
+    self.targetSelector.setMRMLScene( slicer.mrmlScene )
+    self.targetSelector.setToolTip( "Pick the target camera" )
+    self.targetSelector.currentNodeID = action['targetCameraID']
+    layout.addRow("Target camera", self.targetSelector)
+
+    self.rate = ctk.ctkDoubleSpinBox()
+    self.rate.suffix = " degreesPerSecond"
+    self.rate.decimals = 2
+    self.rate.minimum = 0
+    self.rate.value = action['degreesPerSecond']
+    layout.addRow("Rotation rate", self.rate)
+
+  def updateFromGUI(self, action):
+    action['referenceCameraID'] = self.referenceSelector.currentNodeID
+    action['targetCameraID'] = self.targetSelector.currentNodeID
+    action['degreesPerSecond'] = self.rate.value
+
 class ROIAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
   def __init__(self):
     super(ROIAction,self).__init__()
     self.name = "ROIAction"
 
-  def react(self, action, scriptTime):
+  def act(self, action, scriptTime):
     startROI = slicer.mrmlScene.GetNodeByID(action['startROIID'])
     endROI = slicer.mrmlScene.GetNodeByID(action['endROIID'])
     targetROI = slicer.mrmlScene.GetNodeByID(action['targetROIID'])
@@ -112,13 +161,63 @@ class ROIAction(AnimatorAction):
         target[i] = start[i] + fraction * (end[i]-start[i])
       targetROI.SetRadiusXYZ(target)
 
+  def gui(self, action, layout):
+    super(ROIAction,self).gui(action, layout)
+
+    self.startSelector = slicer.qMRMLNodeComboBox()
+    self.startSelector.nodeTypes = ["vtkMRMLAnnotationROINode"]
+    self.startSelector.addEnabled = True
+    self.startSelector.renameEnabled = True
+    self.startSelector.removeEnabled = False
+    self.startSelector.noneEnabled = False
+    self.startSelector.selectNodeUponCreation = True
+    self.startSelector.showHidden = True
+    self.startSelector.showChildNodeTypes = True
+    self.startSelector.setMRMLScene( slicer.mrmlScene )
+    self.startSelector.setToolTip( "Pick the start ROI" )
+    self.startSelector.currentNodeID = action['startROIID']
+    layout.addRow("Start ROI", self.startSelector)
+
+    self.endSelector = slicer.qMRMLNodeComboBox()
+    self.endSelector.nodeTypes = ["vtkMRMLAnnotationROINode"]
+    self.endSelector.addEnabled = True
+    self.endSelector.renameEnabled = True
+    self.endSelector.removeEnabled = False
+    self.endSelector.noneEnabled = False
+    self.endSelector.selectNodeUponCreation = True
+    self.endSelector.showHidden = True
+    self.endSelector.showChildNodeTypes = True
+    self.endSelector.setMRMLScene( slicer.mrmlScene )
+    self.endSelector.setToolTip( "Pick the end ROI" )
+    self.endSelector.currentNodeID = action['endROIID']
+    layout.addRow("End ROI", self.endSelector)
+
+    self.targetSelector = slicer.qMRMLNodeComboBox()
+    self.targetSelector.nodeTypes = ["vtkMRMLAnnotationROINode"]
+    self.targetSelector.addEnabled = True
+    self.targetSelector.renameEnabled = True
+    self.targetSelector.removeEnabled = False
+    self.targetSelector.noneEnabled = False
+    self.targetSelector.selectNodeUponCreation = True
+    self.targetSelector.showHidden = True
+    self.targetSelector.showChildNodeTypes = True
+    self.targetSelector.setMRMLScene( slicer.mrmlScene )
+    self.targetSelector.setToolTip( "Pick the target ROI" )
+    self.targetSelector.currentNodeID = action['targetROIID']
+    layout.addRow("Target ROI", self.targetSelector)
+
+  def updateFromGUI(self, action):
+    action['startROIID'] = self.startSelector.currentNodeID
+    action['endROIID'] = self.endSelector.currentNodeID
+    action['targetROIID'] = self.targetSelector.currentNodeID
+
 class VolumePropertyAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
   def __init__(self):
     super(VolumePropertyAction,self).__init__()
     self.name = "VolumePropertyAction"
 
-  def react(self, action, scriptTime):
+  def act(self, action, scriptTime):
     startVolumeProperty = slicer.mrmlScene.GetNodeByID(action['startVolumePropertyID'])
     endVolumeProperty = slicer.mrmlScene.GetNodeByID(action['endVolumePropertyID'])
     targetVolumeProperty = slicer.mrmlScene.GetNodeByID(action['targetVolumePropertyID'])
@@ -162,6 +261,55 @@ class VolumePropertyAction(AnimatorAction):
         targetColor.SetNodeValue(index, targetValue)
       targetVolumeProperty.EndModify(disabledModify)
 
+  def gui(self, action, layout):
+    super(VolumePropertyAction,self).gui(action, layout)
+
+    self.startSelector = slicer.qMRMLNodeComboBox()
+    self.startSelector.nodeTypes = ["vtkMRMLVolumePropertyNode"]
+    self.startSelector.addEnabled = True
+    self.startSelector.renameEnabled = True
+    self.startSelector.removeEnabled = False
+    self.startSelector.noneEnabled = False
+    self.startSelector.selectNodeUponCreation = True
+    self.startSelector.showHidden = True
+    self.startSelector.showChildNodeTypes = True
+    self.startSelector.setMRMLScene( slicer.mrmlScene )
+    self.startSelector.setToolTip( "Pick the start volume property" )
+    self.startSelector.currentNodeID = action['startVolumePropertyID']
+    layout.addRow("Start VolumeProperty", self.startSelector)
+
+    self.endSelector = slicer.qMRMLNodeComboBox()
+    self.endSelector.nodeTypes = ["vtkMRMLVolumePropertyNode"]
+    self.endSelector.addEnabled = True
+    self.endSelector.renameEnabled = True
+    self.endSelector.removeEnabled = False
+    self.endSelector.noneEnabled = False
+    self.endSelector.selectNodeUponCreation = True
+    self.endSelector.showHidden = True
+    self.endSelector.showChildNodeTypes = True
+    self.endSelector.setMRMLScene( slicer.mrmlScene )
+    self.endSelector.setToolTip( "Pick the end volume property" )
+    self.endSelector.currentNodeID = action['endVolumePropertyID']
+    layout.addRow("End VolumeProperty", self.endSelector)
+
+    self.targetSelector = slicer.qMRMLNodeComboBox()
+    self.targetSelector.nodeTypes = ["vtkMRMLVolumePropertyNode"]
+    self.targetSelector.addEnabled = True
+    self.targetSelector.renameEnabled = True
+    self.targetSelector.removeEnabled = False
+    self.targetSelector.noneEnabled = False
+    self.targetSelector.selectNodeUponCreation = True
+    self.targetSelector.showHidden = True
+    self.targetSelector.showChildNodeTypes = True
+    self.targetSelector.setMRMLScene( slicer.mrmlScene )
+    self.targetSelector.setToolTip( "Pick the target volume property" )
+    self.targetSelector.currentNodeID = action['targetVolumePropertyID']
+    layout.addRow("Target VolumeProperty", self.targetSelector)
+
+  def updateFromGUI(self, action):
+    action['startVolumePropertyID'] = self.startSelector.currentNodeID
+    action['endVolumePropertyID'] = self.endSelector.currentNodeID
+    action['targetVolumePropertyID'] = self.targetSelector.currentNodeID
 
 
 # add an module-specific dict for any module other to add animator plugins.
@@ -276,15 +424,20 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     # Layout within the dummy collapsible button
     self.actionsFormLayout = qt.QFormLayout(actionsCollapsibleButton)
 
-
     # connections
     self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
 
     # Add vertical spacer
     self.layout.addStretch(1)
 
+  def removeSequenceBrowserObserver(self):
+    if self.sequenceBrowserObserverRecord:
+      object,tag = self.sequenceBrowserObserverRecord
+      object.RemoveObserver(tag)
+    self.sequenceBrowserObserverRecord = None
+
   def cleanup(self):
-    pass
+    self.removeSequenceBrowserObserver()
 
   def onSelect(self):
     sequenceBrowserNode = None
@@ -297,22 +450,21 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       sequenceBrowserNode = slicer.mrmlScene.GetNodeByID(sequenceBrowserNodeID)
       sequenceNodeID = animationNode.GetAttribute('Animator.sequenceNodeID')
       sequenceNode = slicer.mrmlScene.GetNodeByID(sequenceNodeID)
-      if self.sequenceBrowserObserverRecord:
-        object,tag = self.sequenceBrowserObserverRecord
-        object.RemoveObserver(tag)
+      self.removeSequenceBrowserObserver()
 
       def onBrowserModified(caller, event):
         index = sequenceBrowserNode.GetSelectedItemNumber()
         scriptTime = float(sequenceNode.GetNthIndexValue(index))
-        self.logic.react(animationNode, scriptTime)
+        self.logic.act(animationNode, scriptTime)
       tag = sequenceBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, onBrowserModified)
       self.sequenceBrowserObserverRecord = (sequenceBrowserNode, tag)
 
       self.animatorActionsGUI = AnimatorActionsGUI(animationNode)
-      self.actionsFormLayout.addRow(self.animatorActionsGUI.buildUI())
+      self.actionsFormLayout.addRow(self.animatorActionsGUI.buildGUI())
 
     self.sequencePlay.setMRMLSequenceBrowserNode(sequenceBrowserNode)
     self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+
 
 class AnimatorActionsGUI(object):
   """Manage the UI elements for animation script
@@ -325,66 +477,60 @@ class AnimatorActionsGUI(object):
   """
   def __init__(self, animationNode):
     self.animationNode = animationNode
+    self.logic = AnimatorLogic()
+    self.script = self.logic.getScript(self.animationNode)
+    self.actions = self.logic.getActions(self.animationNode)
 
-  def buildUI(self):
-    logic = AnimatorLogic()
-    script = logic.getScript(self.animationNode)
-    actions = logic.getActions(self.animationNode)
+  def buildGUI(self):
     self.scrollArea = qt.QScrollArea()
     self.widget = qt.QWidget(self.scrollArea)
     self.scrollArea.widgetResizable = True
     self.scrollArea.setVerticalScrollBarPolicy(qt.Qt.ScrollBarAsNeeded)
     self.layout = qt.QFormLayout()
     self.widget.setLayout(self.layout)
-    for action in actions:
+    for action in self.actions.values():
       editButton = qt.QPushButton(action['name'])
       editButton.connect('clicked()', lambda action=action : self.onEdit(action))
       self.layout.addRow(editButton)
       duration = ctk.ctkDoubleRangeSlider()
-      duration.maximum = script['duration']
+      duration.maximum = self.script['duration']
       duration.minimumValue = action['startTime']
       duration.maximumValue = action['endTime']
+      duration.singleStep = 0.001
       duration.orientation = qt.Qt.Horizontal
       self.layout.addRow(duration)
+      def updateDuration(start, end, action):
+        action['startTime'] = start
+        action['endTime'] = end
+        self.logic.setAction(self.animationNode, action)
+      duration.connect('valuesChanged(double,double)', lambda start, end, action=action: updateDuration(start, end, action))
     return self.widget
 
-  def onEdit(self, action = {}):
+  def onEdit(self, action):
     dialog = qt.QDialog(slicer.util.mainWindow())
     layout = qt.QFormLayout(dialog)
 
     label = qt.QLabel(action['name'])
     layout.addRow("Edit properties of:",  label )
 
-    # TODO: make UIs for each of the pre-defined action types
-
-    colorSelector = slicer.qMRMLColorTableComboBox()
-    colorSelector.nodeTypes = ["vtkMRMLColorNode"]
-    colorSelector.hideChildNodeTypes = ("vtkMRMLDiffusionTensorDisplayPropertiesNode", "vtkMRMLProceduralColorNode", "")
-    colorSelector.addEnabled = False
-    colorSelector.removeEnabled = False
-    colorSelector.noneEnabled = False
-    colorSelector.selectNodeUponCreation = True
-    colorSelector.showHidden = True
-    colorSelector.showChildNodeTypes = True
-    colorSelector.setMRMLScene( slicer.mrmlScene )
-    colorSelector.setToolTip( "Pick the table of structures you wish to edit" )
-    layout.addRow( colorSelector )
+    self.actionInstance = slicer.modules.animatorActionPlugins[action['class']]()
+    self.actionInstance.gui(action, layout)
 
     buttonBox = qt.QDialogButtonBox()
     buttonBox.setStandardButtons(qt.QDialogButtonBox.Ok |
                                       qt.QDialogButtonBox.Cancel)
     layout.addRow(buttonBox)
-
     buttonBox.button(qt.QDialogButtonBox.Ok).setToolTip("Use currently selected color node.")
     buttonBox.button(qt.QDialogButtonBox.Cancel).setToolTip("Cancel current operation.")
-
-    buttonBox.connect("accepted()", lambda : self.accept(dialog))
+    buttonBox.connect("accepted()", lambda action=action : self.accept(dialog, action))
     buttonBox.connect("rejected()", dialog, "reject()")
 
     dialog.exec_()
 
-  def accept(self, dialog):
-    print(dialog)
+  def accept(self, dialog, action):
+    self.actionInstance.updateFromGUI(action)
+    self.logic.setAction(self.animationNode, action)
+    dialog.accept()
 
 #
 # AnimatorLogic
@@ -411,15 +557,20 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
 
   def getActions(self, animationNode):
     script = self.getScript(animationNode)
-    actions = script['actions'] if "actions" in script else []
+    actions = script['actions'] if "actions" in script else {}
     return(actions)
 
   def addAction(self, animationNode, action):
     """Add an action to the script """
     script = self.getScript(animationNode)
     actions = self.getActions(animationNode)
-    actions.append(action)
+    actions[action['id']] = action
     script['actions'] = actions
+    self.setScript(animationNode, script)
+
+  def setAction(self, animationNode, action):
+    script = self.getScript(animationNode)
+    script['actions'][action['id']] = action
     self.setScript(animationNode, script)
 
   def compileScript(self, animationNode):
@@ -428,7 +579,9 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     """
     sequenceBrowserNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceBrowserNode')
     sequenceBrowserNode.SetName(animationNode.GetName() + "-Browser")
-    sequenceBrowserNode.SetPlaybackItemSkippingEnabled(False)
+
+    # TODO: use this when exporting
+    # sequenceBrowserNode.SetPlaybackItemSkippingEnabled(False)
 
     sequenceNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSequenceNode')
     sequenceNode.SetIndexType(sequenceNode.NumericIndex)
@@ -448,13 +601,13 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
 
     return(sequenceBrowserNode)
 
-  def react(self, animationNode, scriptTime):
-    """Give each action in the script a chance to react to the current script time"""
+  def act(self, animationNode, scriptTime):
+    """Give each action in the script a chance to act at the current script time"""
     script = self.getScript(animationNode)
     actions = script['actions']
-    for action in actions:
+    for action in actions.values():
       actionInstance = slicer.modules.animatorActionPlugins[action['class']]()
-      actionInstance.react(action, scriptTime)
+      actionInstance.act(action, scriptTime)
 
 
 class AnimatorTest(ScriptedLoadableModuleTest):
@@ -523,6 +676,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     #
     # set up a translation action
+    # - this is just an example, it's not used in the self test
     #
     startTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     startTransform.SetName('Start Transform')
@@ -551,7 +705,9 @@ class AnimatorTest(ScriptedLoadableModuleTest):
       'targetTransformID': targetTransform.GetID(),
     }
 
-    logic.addAction(animationNode, translationAction)
+    # don't add this because it's not a fully worked out example
+    # (it does translation only, not full transformation interpolation)
+    #logic.addAction(animationNode, translationAction)
 
     #
     # set up a camera rotation action
