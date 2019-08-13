@@ -26,7 +26,34 @@ class TranslationAction(AnimatorAction):
   """Defines an animation of a transform"""
   def __init__(self):
     super(TranslationAction,self).__init__()
-    self.name = "TranslationAction"
+    self.name = "Translation"
+
+  def defaultAction(self):
+    startTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    startTransform.SetName('Start Transform')
+    endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    endTransform.SetName('End Transform')
+    targetTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    targetTransform.SetName('Animated Transform')
+
+    matrix = vtk.vtkMatrix4x4()
+    matrix.SetElement(0,3, 10)
+    matrix.SetElement(1,3, 5)
+    matrix.SetElement(2,3, 15)
+    endTransform.SetMatrixTransformFromParent(matrix)
+
+    translationAction = {
+      'name': 'Translation',
+      'class': 'TranslationAction',
+      'id': 'translation1',
+      'startTime': 4,
+      'endTime': 5,
+      'interpolation': 'linear',
+      'startTransformID': startTransform.GetID(),
+      'endTransformID': endTransform.GetID(),
+      'targetTransformID': targetTransform.GetID(),
+    }
+    return(translationAction)
 
   def act(self, action, scriptTime):
     startTransform = slicer.mrmlScene.GetNodeByID(action['startTransformID'])
@@ -62,7 +89,27 @@ class CameraRotationAction(AnimatorAction):
   """Defines an animation of a transform"""
   def __init__(self):
     super(CameraRotationAction,self).__init__()
-    self.name = "CameraRotationAction"
+    self.name = "Camera Rotation"
+
+  def defaultAction(self):
+    layoutManager = slicer.app.layoutManager()
+    threeDView = layoutManager.threeDWidget(0).threeDView()
+    targetCamera = threeDView.interactorStyle().GetCameraNode()
+    referenceCamera = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLCameraNode')
+    referenceCamera.SetName('referenceCamera')
+    referenceCamera.GetCamera().DeepCopy(targetCamera.GetCamera())
+    cameraRotationAction = {
+      'name': 'CameraRotation',
+      'class': 'CameraRotationAction',
+      'id': 'cameraRotation1',
+      'startTime': .1,
+      'endTime': 4,
+      'interpolation': 'linear',
+      'referenceCameraID': referenceCamera.GetID(),
+      'targetCameraID': targetCamera.GetID(),
+      'degreesPerSecond': 90,
+    }
+    return(cameraRotationAction)
 
   def act(self, action, scriptTime):
     referenceCamera = slicer.mrmlScene.GetNodeByID(action['referenceCameraID'])
@@ -127,7 +174,46 @@ class ROIAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
   def __init__(self):
     super(ROIAction,self).__init__()
-    self.name = "ROIAction"
+    self.name = "ROI"
+
+  def defaultAction(self):
+    startROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
+    startROI.SetName('Start ROI')
+    endROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
+    endROI.SetName('End ROI')
+    for roi in [startROI, endROI]:
+      for index in range(roi.GetNumberOfDisplayNodes()):
+        roi.GetNthDisplayNode(index).SetVisibility(False)
+    #
+    # TODO: what to do if volume rendering not yet set up
+    #
+    volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
+    targetROI = volumeRenderingNode.GetROINode()
+    volumeRenderingNode.SetCroppingEnabled(True)
+
+    start = [0.,]*3
+    targetROI.GetXYZ(start)
+    startROI.SetXYZ(start)
+    endROI.SetXYZ(start)
+    targetROI.GetRadiusXYZ(start)
+    startROI.SetRadiusXYZ(start)
+    end = [0.,]*3
+    for i in range(3):
+      end[i] = start[i] / 2.
+    endROI.SetRadiusXYZ(end)
+
+    roiAction = {
+      'name': 'ROI',
+      'class': 'ROIAction',
+      'id': 'roi1',
+      'startTime': 1,
+      'endTime': 4,
+      'interpolation': 'linear',
+      'startROIID': startROI.GetID(),
+      'endROIID': endROI.GetID(),
+      'targetROIID': targetROI.GetID(),
+    }
+    return(roiAction)
 
   def act(self, action, scriptTime):
     startROI = slicer.mrmlScene.GetNodeByID(action['startROIID'])
@@ -215,7 +301,52 @@ class VolumePropertyAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
   def __init__(self):
     super(VolumePropertyAction,self).__init__()
-    self.name = "VolumePropertyAction"
+    self.name = "Volume Property"
+
+  def defaultAction(self):
+    startVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
+    startVolumeProperty.SetName('Start VolumeProperty')
+    endVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
+    endVolumeProperty.SetName('End VolumeProperty')
+    #
+    # TODO: what to do if volume rendering not yet set up
+    #
+    volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
+    targetVolumeProperty = volumeRenderingNode.GetVolumePropertyNode()
+
+    startVolumeProperty.CopyParameterSet(targetVolumeProperty)
+    endVolumeProperty.CopyParameterSet(targetVolumeProperty)
+
+    endScalarOpacity = endVolumeProperty.GetScalarOpacity()
+    nodeElementCount = 4
+    endValue = [0,]*nodeElementCount
+    endScalarOpacity.GetNodeValue(2, endValue)
+    endValue[0] = 250
+    endValue[1] = 0.25
+    endScalarOpacity.SetNodeValue(2, endValue)
+
+    endColor = endVolumeProperty.GetColor()
+    nodeElementCount = 6
+    endValue = [0.,]*nodeElementCount
+    endColor.GetNodeValue(5, endValue)
+    endValue[0] = 115.
+    endValue[1] = 1.
+    endValue[2] = 1.
+    endValue[3] = 1.
+    endColor.SetNodeValue(5, endValue)
+
+    volumePropertyAction = {
+      'name': 'Volume Property',
+      'class': 'VolumePropertyAction',
+      'id': 'volumeProperty1',
+      'startTime': 0,
+      'endTime': 1,
+      'interpolation': 'linear',
+      'startVolumePropertyID': startVolumeProperty.GetID(),
+      'endVolumePropertyID': endVolumeProperty.GetID(),
+      'targetVolumePropertyID': targetVolumeProperty.GetID(),
+    }
+    return(volumePropertyAction)
 
   def act(self, action, scriptTime):
     startVolumeProperty = slicer.mrmlScene.GetNodeByID(action['startVolumePropertyID'])
@@ -414,6 +545,16 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow(self.sequencePlay)
     parametersFormLayout.addRow(self.sequenceSeek)
 
+    self.actionsMenuButton = qt.QPushButton("Add Action")
+    self.actionsMenuButton.enabled = False
+    self.actionsMenu = qt.QMenu()
+    self.actionsMenuButton.setMenu(self.actionsMenu)
+    for actionName in slicer.modules.animatorActionPlugins.keys():
+      qAction = qt.QAction(actionName, self.actionsMenu)
+      qAction.connect('triggered()', lambda actionName=actionName: self.onAddAction(actionName))
+      self.actionsMenu.addAction(qAction)
+    parametersFormLayout.addWidget(self.actionsMenuButton)
+
     #
     # Actions Area
     #
@@ -423,6 +564,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
 
     # Layout within the dummy collapsible button
     self.actionsFormLayout = qt.QFormLayout(actionsCollapsibleButton)
+
 
     # connections
     self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
@@ -442,11 +584,19 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   def onSelect(self):
     sequenceBrowserNode = None
     sequenceNode = None
-    self.actionsFormLayout.removeWidget(self.actionsFormLayout.itemAt(0))
+    # remove layout items
+    layout = self.actionsFormLayout
+    item = layout.itemAt(0)
+    while item:
+      layout.removeItem(item)
+      item = layout.itemAt(0)
     self.animatorActionsGUI = None
     animationNode = self.animationSelector.currentNode()
     if animationNode:
       sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
+      if sequenceBrowserNodeID is None:
+        self.logic.initializeAnimationNode(animationNode)
+        sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
       sequenceBrowserNode = slicer.mrmlScene.GetNodeByID(sequenceBrowserNodeID)
       sequenceNodeID = animationNode.GetAttribute('Animator.sequenceNodeID')
       sequenceNode = slicer.mrmlScene.GetNodeByID(sequenceNodeID)
@@ -462,8 +612,17 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       self.animatorActionsGUI = AnimatorActionsGUI(animationNode)
       self.actionsFormLayout.addRow(self.animatorActionsGUI.buildGUI())
 
+    self.actionsMenuButton.enabled = animationNode != None
     self.sequencePlay.setMRMLSequenceBrowserNode(sequenceBrowserNode)
     self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
+
+  def onAddAction(self, actionName):
+    animationNode = self.animationSelector.currentNode()
+    if animationNode:
+      actionInstance = slicer.modules.animatorActionPlugins[actionName]()
+      action = actionInstance.defaultAction()
+      self.logic.addAction(animationNode, action)
+      self.onSelect()
 
 
 class AnimatorActionsGUI(object):
@@ -546,6 +705,20 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+  def initializeAnimationNode(self,animationNode):
+    animationNode.SetAttribute('ModuleName', 'Animation')
+    script = {}
+    script['title'] = "Slicer Animation"
+    script['duration'] = 5 # in seconds
+    script['framesPerSecond'] = 30
+    self.setScript(animationNode, script)
+    sequenceBrowserNode = self.compileScript(animationNode)
+    sequenceNodes = vtk.vtkCollection()
+    sequenceBrowserNode.GetSynchronizedSequenceNodes(sequenceNodes, True) # include master
+    sequenceNode = sequenceNodes.GetItemAsObject(0)
+    animationNode.SetAttribute('Animator.sequenceBrowserNodeID', sequenceBrowserNode.GetID())
+    animationNode.SetAttribute('Animator.sequenceNodeID', sequenceNode.GetID())
+
   def getScript(self, animationNode):
     scriptJSON = animationNode.GetAttribute("Animation.script") or "{}"
     script = json.loads(scriptJSON)
@@ -592,10 +765,10 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     # these are used to synchronize the animation
     # but don't hold any other data
     script = self.getScript(animationNode)
-    frames = script['fps'] * script['duration']
-    spf = 1. / script['fps']
+    frames = script['framesPerSecond'] * script['duration']
+    secondsPerFrame = 1. / script['framesPerSecond']
     for frame in range(math.ceil(frames)):
-      scriptTime = frame * spf
+      scriptTime = frame * secondsPerFrame
       timePointDataNode = slicer.vtkMRMLScriptedModuleNode()
       sequenceNode.SetDataNodeAtValue(timePointDataNode, str(scriptTime))
 
@@ -664,47 +837,18 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     #
     animationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScriptedModuleNode')
     animationNode.SetName('SelfTest Animation')
-    animationNode.SetAttribute('ModuleName', 'Animation')
 
     logic = AnimatorLogic()
-
-    script = {}
-    script['title'] = "SelfTest Script"
-    script['duration'] = 5.5 # in seconds
-    script['fps'] = 30
-    logic.setScript(animationNode, script)
+    logic.initializeAnimationNode(animationNode)
 
     #
     # set up a translation action
     # - this is just an example, it's not used in the self test
     #
-    startTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
-    startTransform.SetName('Start Transform')
-    endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
-    endTransform.SetName('End Transform')
-    targetTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
-    targetTransform.SetName('Animated Transform')
 
-    matrix = vtk.vtkMatrix4x4()
-    matrix.SetElement(0,3, 10)
-    matrix.SetElement(1,3, 5)
-    matrix.SetElement(2,3, 15)
-    endTransform.SetMatrixTransformFromParent(matrix)
-
-    mrHead.SetAndObserveTransformNodeID(targetTransform.GetID())
-
-    translationAction = {
-      'name': 'Translation',
-      'class': 'TranslationAction',
-      'id': 'translation1',
-      'startTime': 4,
-      'endTime': 5,
-      'interpolation': 'linear',
-      'startTransformID': startTransform.GetID(),
-      'endTransformID': endTransform.GetID(),
-      'targetTransformID': targetTransform.GetID(),
-    }
-
+    actionInstance = slicer.modules.animatorActionPlugins["TranslationAction"]()
+    translationAction = actionInstance.defaultAction()
+    mrHead.SetAndObserveTransformNodeID(translationAction['targetTransformID'])
     # don't add this because it's not a fully worked out example
     # (it does translation only, not full transformation interpolation)
     #logic.addAction(animationNode, translationAction)
@@ -712,108 +856,22 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     #
     # set up a camera rotation action
     #
-    layoutManager = slicer.app.layoutManager()
-    threeDView = layoutManager.threeDWidget(0).threeDView()
-    targetCamera = threeDView.interactorStyle().GetCameraNode()
-    referenceCamera = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLCameraNode')
-    referenceCamera.SetName('referenceCamera')
-    referenceCamera.GetCamera().DeepCopy(targetCamera.GetCamera())
-    cameraRotationAction = {
-      'name': 'CameraRotation',
-      'class': 'CameraRotationAction',
-      'id': 'cameraRotation1',
-      'startTime': .1,
-      'endTime': 4,
-      'interpolation': 'linear',
-      'referenceCameraID': referenceCamera.GetID(),
-      'targetCameraID': targetCamera.GetID(),
-      'degreesPerSecond': 90,
-    }
-
+    actionInstance = slicer.modules.animatorActionPlugins["CameraRotationAction"]()
+    cameraRotationAction = actionInstance.defaultAction()
     logic.addAction(animationNode, cameraRotationAction)
 
     #
     # set up an ROI action
     #
-    startROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
-    startROI.SetName('Start ROI')
-    endROI = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLAnnotationROINode')
-    endROI.SetName('End ROI')
-    for roi in [startROI, endROI]:
-      for index in range(roi.GetNumberOfDisplayNodes()):
-        roi.GetNthDisplayNode(index).SetVisibility(False)
-    targetROI = volumeRenderingNode.GetROINode()
-    volumeRenderingNode.SetCroppingEnabled(True)
-
-    start = [0.,]*3
-    targetROI.GetXYZ(start)
-    startROI.SetXYZ(start)
-    endROI.SetXYZ(start)
-    targetROI.GetRadiusXYZ(start)
-    startROI.SetRadiusXYZ(start)
-    end = [0.,]*3
-    for i in range(3):
-      end[i] = start[i] / 2.
-    endROI.SetRadiusXYZ(end)
-
-    roiAction = {
-      'name': 'ROI',
-      'class': 'ROIAction',
-      'id': 'roi1',
-      'startTime': 1,
-      'endTime': 4,
-      'interpolation': 'linear',
-      'startROIID': startROI.GetID(),
-      'endROIID': endROI.GetID(),
-      'targetROIID': targetROI.GetID(),
-    }
-
+    actionInstance = slicer.modules.animatorActionPlugins["ROIAction"]()
+    roiAction = actionInstance.defaultAction()
     logic.addAction(animationNode, roiAction)
 
     #
     # set up a volume property action
     #
-    startVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
-    startVolumeProperty.SetName('Start VolumeProperty')
-    endVolumeProperty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLVolumePropertyNode')
-    endVolumeProperty.SetName('End VolumeProperty')
-    targetVolumeProperty = volumeRenderingNode.GetVolumePropertyNode()
-
-    startVolumeProperty.CopyParameterSet(targetVolumeProperty)
-    endVolumeProperty.CopyParameterSet(targetVolumeProperty)
-
-    endScalarOpacity = endVolumeProperty.GetScalarOpacity()
-    nodeElementCount = 4
-    endValue = [0,]*nodeElementCount
-    endScalarOpacity.GetNodeValue(2, endValue)
-    endValue[0] = 250
-    endValue[1] = 0.25
-    endScalarOpacity.SetNodeValue(2, endValue)
-
-    endColor = endVolumeProperty.GetColor()
-    nodeElementCount = 6
-    endValue = [0.,]*nodeElementCount
-    endColor.GetNodeValue(5, endValue)
-    print(endColor)
-    print(endValue)
-    endValue[0] = 115.
-    endValue[1] = 1.
-    endValue[2] = 1.
-    endValue[3] = 1.
-    endColor.SetNodeValue(5, endValue)
-
-    volumePropertyAction = {
-      'name': 'Volume Property',
-      'class': 'VolumePropertyAction',
-      'id': 'volumeProperty1',
-      'startTime': 0,
-      'endTime': 1,
-      'interpolation': 'linear',
-      'startVolumePropertyID': startVolumeProperty.GetID(),
-      'endVolumePropertyID': endVolumeProperty.GetID(),
-      'targetVolumePropertyID': targetVolumeProperty.GetID(),
-    }
-
+    actionInstance = slicer.modules.animatorActionPlugins["VolumePropertyAction"]()
+    volumePropertyAction = actionInstance.defaultAction()
     logic.addAction(animationNode, volumePropertyAction)
 
     #
