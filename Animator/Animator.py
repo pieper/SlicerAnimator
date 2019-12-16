@@ -493,13 +493,14 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
     # tracks the modified event observer on the currently
     # selected sequence browser node
     self.sequenceBrowserObserverRecord = None
+
+    self.animatorActionsGUI = None
 
     self.logic = AnimatorLogic()
 
@@ -588,19 +589,12 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     sequenceBrowserNode = None
     sequenceNode = None
 
-    # remove layout items
-    # see https://github.com/pieper/SlicerAnimator/issues/12
-    # for rowIndex in range(layout.rowCount()):
-      # layout.removeRow(0)
-
+    if self.animatorActionsGUI:
+      self.animatorActionsGUI.destroyGUI()
     layout = self.actionsFormLayout
-    items = []
-    for itemIndex in range(layout.count()):
-      items.append(layout.itemAt(itemIndex))
-    for item in items:
-      layout.removeItem(item)
+    for item in range(layout.count()):
+      layout.takeAt(0)
 
-    self.animatorActionsGUI = None
     animationNode = self.animationSelector.currentNode()
     if animationNode:
       sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
@@ -619,7 +613,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       tag = sequenceBrowserNode.AddObserver(vtk.vtkCommand.ModifiedEvent, onBrowserModified)
       self.sequenceBrowserObserverRecord = (sequenceBrowserNode, tag)
 
-      self.animatorActionsGUI = AnimatorActionsGUI(animationNode)
+      self.animatorActionsGUI = AnimatorActionsGUI(animationNode, deleteCallback=self.onSelect)
       self.actionsFormLayout.addRow(self.animatorActionsGUI.buildGUI())
 
     self.actionsMenuButton.enabled = animationNode != None
@@ -644,23 +638,32 @@ class AnimatorActionsGUI(object):
      TODO: this is hard coded for now, but can be generalized
      based on experience.
   """
-  def __init__(self, animationNode):
+  def __init__(self, animationNode, deleteCallback=lambda : None):
     self.animationNode = animationNode
     self.logic = AnimatorLogic()
     self.script = self.logic.getScript(self.animationNode)
-    self.actions = self.logic.getActions(self.animationNode)
+    self.deleteCallback = deleteCallback
 
   def buildGUI(self):
     self.scrollArea = qt.QScrollArea()
-    self.widget = qt.QWidget(self.scrollArea)
+    self.widget = qt.QWidget()
     self.scrollArea.widgetResizable = True
     self.scrollArea.setVerticalScrollBarPolicy(qt.Qt.ScrollBarAsNeeded)
     self.layout = qt.QFormLayout()
     self.widget.setLayout(self.layout)
-    for action in self.actions.values():
-      editButton = qt.QPushButton(action['name'])
+    self.scrollArea.setWidget(self.widget)
+    actions = self.logic.getActions(self.animationNode)
+    for action in actions.values():
+      actionRowLayout = qt.QHBoxLayout()
+      actionLabel = qt.QLabel(action['name'])
+      actionRowLayout.addWidget(actionLabel)
+      editButton = qt.QPushButton('Edit')
       editButton.connect('clicked()', lambda action=action : self.onEdit(action))
-      self.layout.addRow(editButton)
+      actionRowLayout.addWidget(editButton)
+      deleteButton = qt.QPushButton('Delete')
+      deleteButton.connect('clicked()', lambda action=action : self.onDelete(action))
+      actionRowLayout.addWidget(deleteButton)
+      self.layout.addRow(actionRowLayout)
       durationSlider = ctk.ctkDoubleRangeSlider()
       durationSlider.maximum = self.script['duration']
       durationSlider.minimumValue = action['startTime']
@@ -673,7 +676,10 @@ class AnimatorActionsGUI(object):
         action['endTime'] = end
         self.logic.setAction(self.animationNode, action)
       durationSlider.connect('valuesChanged(double,double)', lambda start, end, action=action: updateDuration(start, end, action))
-    return self.widget
+    return self.scrollArea
+
+  def destroyGUI(self):
+    self.scrollArea.takeWidget()
 
   def onEdit(self, action):
     dialog = qt.QDialog(slicer.util.mainWindow())
@@ -700,6 +706,10 @@ class AnimatorActionsGUI(object):
     self.actionInstance.updateFromGUI(action)
     self.logic.setAction(self.animationNode, action)
     dialog.accept()
+
+  def onDelete(self, action):
+    self.logic.removeAction(self.animationNode, action)
+    self.deleteCallback()
 
 #
 # AnimatorLogic
@@ -751,6 +761,14 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     script = self.getScript(animationNode)
     actions = self.getActions(animationNode)
     actions[action['id']] = action
+    script['actions'] = actions
+    self.setScript(animationNode, script)
+
+  def removeAction(self, animationNode, action):
+    """Remove an action from the script """
+    script = self.getScript(animationNode)
+    actions = self.getActions(animationNode)
+    del(actions[action['id']])
     script['actions'] = actions
     self.setScript(animationNode, script)
 
@@ -858,9 +876,9 @@ class AnimatorTest(ScriptedLoadableModuleTest):
     # - this is just an example, it's not used in the self test
     #
 
-    actionInstance = slicer.modules.animatorActionPlugins["TranslationAction"]()
-    translationAction = actionInstance.defaultAction()
-    mrHead.SetAndObserveTransformNodeID(translationAction['targetTransformID'])
+    #actionInstance = slicer.modules.animatorActionPlugins["TranslationAction"]()
+    #translationAction = actionInstance.defaultAction()
+    #mrHead.SetAndObserveTransformNodeID(translationAction['targetTransformID'])
     # don't add this because it's not a fully worked out example
     # (it does translation only, not full transformation interpolation)
     #logic.addAction(animationNode, translationAction)
