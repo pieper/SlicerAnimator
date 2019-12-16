@@ -453,7 +453,7 @@ try:
   slicer.modules.animatorActionPlugins
 except AttributeError:
   slicer.modules.animatorActionPlugins = {}
-slicer.modules.animatorActionPlugins['TranslationAction'] = TranslationAction
+# slicer.modules.animatorActionPlugins['TranslationAction'] = TranslationAction ;# disable since it does nothing
 slicer.modules.animatorActionPlugins['CameraRotationAction'] = CameraRotationAction
 slicer.modules.animatorActionPlugins['ROIAction'] = ROIAction
 slicer.modules.animatorActionPlugins['VolumePropertyAction'] = VolumePropertyAction
@@ -515,11 +515,20 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     # Layout within the dummy collapsible button
     parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
 
+    self.durationBox = ctk.ctkDoubleSpinBox()
+    self.durationBox.suffix = " seconds"
+    self.durationBox.decimals = 1
+    self.durationBox.minimum = 1
+    self.durationBox.value = 5
+    self.durationBox.toolTip = "Duration cannot be changed after animation created"
+    parametersFormLayout.addRow("New animation duration", self.durationBox)
+
     #
     # input volume selector
     #
     self.animationSelector = slicer.qMRMLNodeComboBox()
     self.animationSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
+    self.animationSelector.setNodeTypeLabel("Animation", "vtkMRMLScriptedModuleNode")
     self.animationSelector.selectNodeUponCreation = True
     self.animationSelector.addEnabled = True
     self.animationSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "Animation")
@@ -537,13 +546,6 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     self.sequenceSeek = slicer.qMRMLSequenceBrowserSeekWidget()
     self.sequenceSeek.setMRMLScene(slicer.mrmlScene)
 
-    self.duration = ctk.ctkDoubleSpinBox()
-    self.duration.suffix = " seconds"
-    self.duration.decimals = 1
-    self.duration.minimum = 1
-    self.duration.value = 5
-
-    parametersFormLayout.addRow("Duration", self.duration)
     parametersFormLayout.addRow(self.sequencePlay)
     parametersFormLayout.addRow(self.sequenceSeek)
 
@@ -560,13 +562,12 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     #
     # Actions Area
     #
-    actionsCollapsibleButton = ctk.ctkCollapsibleButton()
-    actionsCollapsibleButton.text = "Actions"
-    self.layout.addWidget(actionsCollapsibleButton)
+    self.actionsCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.actionsCollapsibleButton.text = "Actions"
+    self.layout.addWidget(self.actionsCollapsibleButton)
 
     # Layout within the dummy collapsible button
-    self.actionsFormLayout = qt.QFormLayout(actionsCollapsibleButton)
-
+    self.actionsFormLayout = qt.QFormLayout(self.actionsCollapsibleButton)
 
     # connections
     self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
@@ -586,18 +587,25 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   def onSelect(self):
     sequenceBrowserNode = None
     sequenceNode = None
+
     # remove layout items
+    # see https://github.com/pieper/SlicerAnimator/issues/12
+    # for rowIndex in range(layout.rowCount()):
+      # layout.removeRow(0)
+
     layout = self.actionsFormLayout
-    item = layout.itemAt(0)
-    while item:
+    items = []
+    for itemIndex in range(layout.count()):
+      items.append(layout.itemAt(itemIndex))
+    for item in items:
       layout.removeItem(item)
-      item = layout.itemAt(0)
+
     self.animatorActionsGUI = None
     animationNode = self.animationSelector.currentNode()
     if animationNode:
       sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
       if sequenceBrowserNodeID is None:
-        self.logic.initializeAnimationNode(animationNode)
+        self.logic.initializeAnimationNode(animationNode, self.durationBox.value)
         sequenceBrowserNodeID = animationNode.GetAttribute('Animator.sequenceBrowserNodeID')
       sequenceBrowserNode = slicer.mrmlScene.GetNodeByID(sequenceBrowserNodeID)
       sequenceNodeID = animationNode.GetAttribute('Animator.sequenceNodeID')
@@ -653,18 +661,18 @@ class AnimatorActionsGUI(object):
       editButton = qt.QPushButton(action['name'])
       editButton.connect('clicked()', lambda action=action : self.onEdit(action))
       self.layout.addRow(editButton)
-      duration = ctk.ctkDoubleRangeSlider()
-      duration.maximum = self.script['duration']
-      duration.minimumValue = action['startTime']
-      duration.maximumValue = action['endTime']
-      duration.singleStep = 0.001
-      duration.orientation = qt.Qt.Horizontal
-      self.layout.addRow(duration)
+      durationSlider = ctk.ctkDoubleRangeSlider()
+      durationSlider.maximum = self.script['duration']
+      durationSlider.minimumValue = action['startTime']
+      durationSlider.maximumValue = action['endTime']
+      durationSlider.singleStep = 0.001
+      durationSlider.orientation = qt.Qt.Horizontal
+      self.layout.addRow(durationSlider)
       def updateDuration(start, end, action):
         action['startTime'] = start
         action['endTime'] = end
         self.logic.setAction(self.animationNode, action)
-      duration.connect('valuesChanged(double,double)', lambda start, end, action=action: updateDuration(start, end, action))
+      durationSlider.connect('valuesChanged(double,double)', lambda start, end, action=action: updateDuration(start, end, action))
     return self.widget
 
   def onEdit(self, action):
@@ -707,13 +715,16 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def initializeAnimationNode(self,animationNode):
+  def initializeAnimationNode(self,animationNode,duration=5):
     animationNode.SetAttribute('ModuleName', 'Animation')
     script = {}
     script['title'] = "Slicer Animation"
-    script['duration'] = 5 # in seconds
-    script['framesPerSecond'] = 30
+    script['duration'] = duration # in seconds
+    script['framesPerSecond'] = 60
     self.setScript(animationNode, script)
+    self.generateSequence(animationNode)
+
+  def generateSequence(self,animationNode):
     sequenceBrowserNode = self.compileScript(animationNode)
     sequenceNodes = vtk.vtkCollection()
     sequenceBrowserNode.GetSynchronizedSequenceNodes(sequenceNodes, True) # include master
@@ -763,7 +774,7 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
     sequenceNode.SetName(animationNode.GetName() + "-TimingSequence")
     sequenceBrowserNode.AddSynchronizedSequenceNode(sequenceNode)
 
-    # create on data node per frame of the script.
+    # create one data node per frame of the script.
     # these are used to synchronize the animation
     # but don't hold any other data
     script = self.getScript(animationNode)
@@ -778,8 +789,7 @@ class AnimatorLogic(ScriptedLoadableModuleLogic):
 
   def act(self, animationNode, scriptTime):
     """Give each action in the script a chance to act at the current script time"""
-    script = self.getScript(animationNode)
-    actions = script['actions']
+    actions = self.getActions(animationNode)
     for action in actions.values():
       actionInstance = slicer.modules.animatorActionPlugins[action['class']]()
       actionInstance.act(action, scriptTime)
