@@ -2,6 +2,7 @@ import json
 import math
 import os
 import unittest
+import uuid
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
@@ -15,6 +16,7 @@ class AnimatorAction(object):
     self.name = "Action"
     self.startTime = 0 # in seconds from start of script
     self.endTime = 0
+    self.uuid = uuid.uuid4()
 
   def act(self, action, scriptTime):
     pass
@@ -45,7 +47,7 @@ class TranslationAction(AnimatorAction):
     translationAction = {
       'name': 'Translation',
       'class': 'TranslationAction',
-      'id': 'translation1',
+      'id': 'translation-'+str(self.uuid),
       'startTime': 4,
       'endTime': 5,
       'interpolation': 'linear',
@@ -101,7 +103,7 @@ class CameraRotationAction(AnimatorAction):
     cameraRotationAction = {
       'name': 'CameraRotation',
       'class': 'CameraRotationAction',
-      'id': 'cameraRotation1',
+      'id': 'cameraRotation-'+str(self.uuid),
       'startTime': .1,
       'endTime': 4,
       'interpolation': 'linear',
@@ -205,7 +207,7 @@ class ROIAction(AnimatorAction):
     roiAction = {
       'name': 'ROI',
       'class': 'ROIAction',
-      'id': 'roi1',
+      'id': 'roi-'+str(self.uuid),
       'startTime': 1,
       'endTime': 4,
       'interpolation': 'linear',
@@ -338,7 +340,7 @@ class VolumePropertyAction(AnimatorAction):
     volumePropertyAction = {
       'name': 'Volume Property',
       'class': 'VolumePropertyAction',
-      'id': 'volumeProperty1',
+      'id': 'volumeProperty1-'+str(self.uuid),
       'startTime': 0,
       'endTime': 1,
       'interpolation': 'linear',
