@@ -92,6 +92,7 @@ class CameraRotationAction(AnimatorAction):
   def __init__(self):
     super(CameraRotationAction,self).__init__()
     self.name = "Camera Rotation"
+    self.animationMethods = ['azimuth', 'elevation', 'roll']
 
   def defaultAction(self):
     layoutManager = slicer.app.layoutManager()
@@ -110,6 +111,7 @@ class CameraRotationAction(AnimatorAction):
       'referenceCameraID': referenceCamera.GetID(),
       'targetCameraID': targetCamera.GetID(),
       'degreesPerSecond': 90,
+      'animationMethod': 'azimuth',
     }
     return(cameraRotationAction)
 
@@ -125,7 +127,11 @@ class CameraRotationAction(AnimatorAction):
       if actionTime > action['endTime']:
         actionTime = action['endTime'] # clamp to rotation at end
       angle = actionTime * action['degreesPerSecond']
-      targetCamera.GetCamera().Azimuth(angle)
+      cameraObject = targetCamera.GetCamera()
+      methodMapping = {'azimuth': cameraObject.Azimuth,
+                       'elevation': cameraObject.Elevation,
+                       'roll': cameraObject.Roll,}
+      methodMapping[action['animationMethod']](angle)
       targetCamera.GetCamera().OrthogonalizeViewUp()
       # TODO: this->Renderer->UpdateLightsGeometryToFollowCamera()
 
@@ -167,10 +173,17 @@ class CameraRotationAction(AnimatorAction):
     self.rate.value = action['degreesPerSecond']
     layout.addRow("Rotation rate", self.rate)
 
+    self.method = qt.QComboBox()
+    for method in self.animationMethods:
+      self.method.addItem(method)
+    self.method.currentText = action['animationMethod']
+    layout.addRow("Animation method", self.method)
+
   def updateFromGUI(self, action):
     action['referenceCameraID'] = self.referenceSelector.currentNodeID
     action['targetCameraID'] = self.targetSelector.currentNodeID
     action['degreesPerSecond'] = self.rate.value
+    action['animationMethod'] = self.method.currentText
 
 class ROIAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
