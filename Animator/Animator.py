@@ -35,8 +35,8 @@ class TranslationAction(AnimatorAction):
     startTransform.SetName('Start Transform')
     endTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     endTransform.SetName('End Transform')
-    targetTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
-    targetTransform.SetName('Animated Transform')
+    animatedTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    animatedTransform.SetName('Animated Transform')
 
     matrix = vtk.vtkMatrix4x4()
     matrix.SetElement(0,3, 10)
@@ -53,22 +53,22 @@ class TranslationAction(AnimatorAction):
       'interpolation': 'linear',
       'startTransformID': startTransform.GetID(),
       'endTransformID': endTransform.GetID(),
-      'targetTransformID': targetTransform.GetID(),
+      'animatedTransformID': animatedTransform.GetID(),
     }
     return(translationAction)
 
   def act(self, action, scriptTime):
     startTransform = slicer.mrmlScene.GetNodeByID(action['startTransformID'])
     endTransform = slicer.mrmlScene.GetNodeByID(action['endTransformID'])
-    targetTransform = slicer.mrmlScene.GetNodeByID(action['targetTransformID'])
+    animatedTransform = slicer.mrmlScene.GetNodeByID(action['animatedTransformID'])
     if scriptTime <= action['startTime']:
       matrix = vtk.vtkMatrix4x4()
       startTransform.GetMatrixTransformFromParent(matrix)
-      targetTransform.SetMatrixTransformFromParent(matrix)
+      animatedTransform.SetMatrixTransformFromParent(matrix)
     elif scriptTime >= action['endTime']:
       matrix = vtk.vtkMatrix4x4()
       endTransform.GetMatrixTransformFromParent(matrix)
-      targetTransform.SetMatrixTransformFromParent(matrix)
+      animatedTransform.SetMatrixTransformFromParent(matrix)
     else:
       actionTime = scriptTime - action['startTime']
       duration = action['endTime'] - action['startTime']
@@ -77,15 +77,15 @@ class TranslationAction(AnimatorAction):
       startTransform.GetMatrixTransformFromParent(startMatrix)
       endMatrix = vtk.vtkMatrix4x4()
       endTransform.GetMatrixTransformFromParent(endMatrix)
-      targetMatrix = vtk.vtkMatrix4x4()
-      targetMatrix.DeepCopy(startMatrix)
+      animatedMatrix = vtk.vtkMatrix4x4()
+      animatedMatrix.DeepCopy(startMatrix)
       for i in range(3):
         start = startMatrix.GetElement(i,3)
         end = endMatrix.GetElement(i,3)
         delta = fraction * (end-start)
         # TODO: add interpolation and ease in/out options
-        targetMatrix.SetElement(i,3, start + delta)
-      targetTransform.SetMatrixTransformFromParent(targetMatrix)
+        animatedMatrix.SetElement(i,3, start + delta)
+      animatedTransform.SetMatrixTransformFromParent(animatedMatrix)
 
 class CameraRotationAction(AnimatorAction):
   """Defines an animation of a transform"""
@@ -97,10 +97,10 @@ class CameraRotationAction(AnimatorAction):
   def defaultAction(self):
     layoutManager = slicer.app.layoutManager()
     threeDView = layoutManager.threeDWidget(0).threeDView()
-    targetCamera = threeDView.interactorStyle().GetCameraNode()
+    animatedCamera = threeDView.interactorStyle().GetCameraNode()
     referenceCamera = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLCameraNode')
     referenceCamera.SetName('referenceCamera')
-    referenceCamera.GetCamera().DeepCopy(targetCamera.GetCamera())
+    referenceCamera.GetCamera().DeepCopy(animatedCamera.GetCamera())
     cameraRotationAction = {
       'name': 'CameraRotation',
       'class': 'CameraRotationAction',
@@ -109,7 +109,7 @@ class CameraRotationAction(AnimatorAction):
       'endTime': 4,
       'interpolation': 'linear',
       'referenceCameraID': referenceCamera.GetID(),
-      'targetCameraID': targetCamera.GetID(),
+      'animatedCameraID': animatedCamera.GetID(),
       'degreesPerSecond': 90,
       'animationMethod': 'azimuth',
     }
@@ -117,9 +117,9 @@ class CameraRotationAction(AnimatorAction):
 
   def act(self, action, scriptTime):
     referenceCamera = slicer.mrmlScene.GetNodeByID(action['referenceCameraID'])
-    targetCamera = slicer.mrmlScene.GetNodeByID(action['targetCameraID'])
+    animatedCamera = slicer.mrmlScene.GetNodeByID(action['animatedCameraID'])
 
-    targetCamera.GetCamera().DeepCopy(referenceCamera.GetCamera())
+    animatedCamera.GetCamera().DeepCopy(referenceCamera.GetCamera())
     if scriptTime <= action['startTime']:
       return
     else:
@@ -127,12 +127,12 @@ class CameraRotationAction(AnimatorAction):
       if actionTime > action['endTime']:
         actionTime = action['endTime'] # clamp to rotation at end
       angle = actionTime * action['degreesPerSecond']
-      cameraObject = targetCamera.GetCamera()
+      cameraObject = animatedCamera.GetCamera()
       methodMapping = {'azimuth': cameraObject.Azimuth,
                        'elevation': cameraObject.Elevation,
                        'roll': cameraObject.Roll,}
       methodMapping[action['animationMethod']](angle)
-      targetCamera.GetCamera().OrthogonalizeViewUp()
+      animatedCamera.GetCamera().OrthogonalizeViewUp()
       # TODO: this->Renderer->UpdateLightsGeometryToFollowCamera()
 
   def gui(self, action, layout):
@@ -152,19 +152,19 @@ class CameraRotationAction(AnimatorAction):
     self.referenceSelector.currentNodeID = action['referenceCameraID']
     layout.addRow("Reference camera", self.referenceSelector)
 
-    self.targetSelector = slicer.qMRMLNodeComboBox()
-    self.targetSelector.nodeTypes = ["vtkMRMLCameraNode"]
-    self.targetSelector.addEnabled = True
-    self.targetSelector.renameEnabled = True
-    self.targetSelector.removeEnabled = False
-    self.targetSelector.noneEnabled = False
-    self.targetSelector.selectNodeUponCreation = True
-    self.targetSelector.showHidden = True
-    self.targetSelector.showChildNodeTypes = True
-    self.targetSelector.setMRMLScene( slicer.mrmlScene )
-    self.targetSelector.setToolTip( "Pick the target camera" )
-    self.targetSelector.currentNodeID = action['targetCameraID']
-    layout.addRow("Target camera", self.targetSelector)
+    self.animatedSelector = slicer.qMRMLNodeComboBox()
+    self.animatedSelector.nodeTypes = ["vtkMRMLCameraNode"]
+    self.animatedSelector.addEnabled = True
+    self.animatedSelector.renameEnabled = True
+    self.animatedSelector.removeEnabled = False
+    self.animatedSelector.noneEnabled = False
+    self.animatedSelector.selectNodeUponCreation = True
+    self.animatedSelector.showHidden = True
+    self.animatedSelector.showChildNodeTypes = True
+    self.animatedSelector.setMRMLScene( slicer.mrmlScene )
+    self.animatedSelector.setToolTip( "Pick the animated camera" )
+    self.animatedSelector.currentNodeID = action['animatedCameraID']
+    layout.addRow("Animated camera", self.animatedSelector)
 
     self.rate = ctk.ctkDoubleSpinBox()
     self.rate.suffix = " degreesPerSecond"
@@ -181,7 +181,7 @@ class CameraRotationAction(AnimatorAction):
 
   def updateFromGUI(self, action):
     action['referenceCameraID'] = self.referenceSelector.currentNodeID
-    action['targetCameraID'] = self.targetSelector.currentNodeID
+    action['animatedCameraID'] = self.animatedSelector.currentNodeID
     action['degreesPerSecond'] = self.rate.value
     action['animationMethod'] = self.method.currentText
 
@@ -203,14 +203,14 @@ class ROIAction(AnimatorAction):
     # TODO: what to do if volume rendering not yet set up
     #
     volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
-    targetROI = volumeRenderingNode.GetROINode()
+    animatedROI = volumeRenderingNode.GetROINode()
     volumeRenderingNode.SetCroppingEnabled(True)
 
     start = [0.,]*3
-    targetROI.GetXYZ(start)
+    animatedROI.GetXYZ(start)
     startROI.SetXYZ(start)
     endROI.SetXYZ(start)
-    targetROI.GetRadiusXYZ(start)
+    animatedROI.GetRadiusXYZ(start)
     startROI.SetRadiusXYZ(start)
     end = [0.,]*3
     for i in range(3):
@@ -226,27 +226,27 @@ class ROIAction(AnimatorAction):
       'interpolation': 'linear',
       'startROIID': startROI.GetID(),
       'endROIID': endROI.GetID(),
-      'targetROIID': targetROI.GetID(),
+      'animatedROIID': animatedROI.GetID(),
     }
     return(roiAction)
 
   def act(self, action, scriptTime):
     startROI = slicer.mrmlScene.GetNodeByID(action['startROIID'])
     endROI = slicer.mrmlScene.GetNodeByID(action['endROIID'])
-    targetROI = slicer.mrmlScene.GetNodeByID(action['targetROIID'])
+    animatedROI = slicer.mrmlScene.GetNodeByID(action['animatedROIID'])
     start = [0.,]*3
     end = [0.,]*3
-    target = [0,]*3
+    animated = [0,]*3
     if scriptTime <= action['startTime']:
       startROI.GetXYZ(start)
-      targetROI.SetXYZ(start)
+      animatedROI.SetXYZ(start)
       startROI.GetRadiusXYZ(start)
-      targetROI.SetRadiusXYZ(start)
+      animatedROI.SetRadiusXYZ(start)
     elif scriptTime >= action['endTime']:
       endROI.GetXYZ(end)
-      targetROI.SetXYZ(end)
+      animatedROI.SetXYZ(end)
       endROI.GetRadiusXYZ(end)
-      targetROI.SetRadiusXYZ(end)
+      animatedROI.SetRadiusXYZ(end)
     else:
       actionTime = scriptTime - action['startTime']
       duration = action['endTime'] - action['startTime']
@@ -254,13 +254,13 @@ class ROIAction(AnimatorAction):
       startROI.GetXYZ(start)
       endROI.GetXYZ(end)
       for i in range(3):
-        target[i] = start[i] + fraction * (end[i]-start[i])
-      targetROI.SetXYZ(target)
+        animated[i] = start[i] + fraction * (end[i]-start[i])
+      animatedROI.SetXYZ(animated)
       startROI.GetRadiusXYZ(start)
       endROI.GetRadiusXYZ(end)
       for i in range(3):
-        target[i] = start[i] + fraction * (end[i]-start[i])
-      targetROI.SetRadiusXYZ(target)
+        animated[i] = start[i] + fraction * (end[i]-start[i])
+      animatedROI.SetRadiusXYZ(animated)
 
   def gui(self, action, layout):
     super(ROIAction,self).gui(action, layout)
@@ -293,24 +293,24 @@ class ROIAction(AnimatorAction):
     self.endSelector.currentNodeID = action['endROIID']
     layout.addRow("End ROI", self.endSelector)
 
-    self.targetSelector = slicer.qMRMLNodeComboBox()
-    self.targetSelector.nodeTypes = ["vtkMRMLAnnotationROINode"]
-    self.targetSelector.addEnabled = True
-    self.targetSelector.renameEnabled = True
-    self.targetSelector.removeEnabled = False
-    self.targetSelector.noneEnabled = False
-    self.targetSelector.selectNodeUponCreation = True
-    self.targetSelector.showHidden = True
-    self.targetSelector.showChildNodeTypes = True
-    self.targetSelector.setMRMLScene( slicer.mrmlScene )
-    self.targetSelector.setToolTip( "Pick the target ROI" )
-    self.targetSelector.currentNodeID = action['targetROIID']
-    layout.addRow("Target ROI", self.targetSelector)
+    self.animatedSelector = slicer.qMRMLNodeComboBox()
+    self.animatedSelector.nodeTypes = ["vtkMRMLAnnotationROINode"]
+    self.animatedSelector.addEnabled = True
+    self.animatedSelector.renameEnabled = True
+    self.animatedSelector.removeEnabled = False
+    self.animatedSelector.noneEnabled = False
+    self.animatedSelector.selectNodeUponCreation = True
+    self.animatedSelector.showHidden = True
+    self.animatedSelector.showChildNodeTypes = True
+    self.animatedSelector.setMRMLScene( slicer.mrmlScene )
+    self.animatedSelector.setToolTip( "Pick the animated ROI" )
+    self.animatedSelector.currentNodeID = action['animatedROIID']
+    layout.addRow("Animated ROI", self.animatedSelector)
 
   def updateFromGUI(self, action):
     action['startROIID'] = self.startSelector.currentNodeID
     action['endROIID'] = self.endSelector.currentNodeID
-    action['targetROIID'] = self.targetSelector.currentNodeID
+    action['animatedROIID'] = self.animatedSelector.currentNodeID
 
 class VolumePropertyAction(AnimatorAction):
   """Defines an animation of an roi (e.g. for volume cropping)"""
@@ -327,28 +327,22 @@ class VolumePropertyAction(AnimatorAction):
     # TODO: what to do if volume rendering not yet set up
     #
     volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
-    targetVolumeProperty = volumeRenderingNode.GetVolumePropertyNode()
+    if volumeRenderingNode is None:
+      volumeNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLScalarVolumeNode')
+      if volumeNode is None:
+          print("No volume node in the scene")
+          return
+      logic = slicer.modules.volumerendering.logic()
+      displayNode = logic.CreateVolumeRenderingDisplayNode()
+      slicer.mrmlScene.AddNode(displayNode)
+      displayNode.UnRegister(logic)
+      logic.UpdateDisplayNodeFromVolumeNode(displayNode, volumeNode)
+      volumeNode.AddAndObserveDisplayNodeID(displayNode.GetID())
+    volumeRenderingNode = slicer.mrmlScene.GetFirstNodeByName('VolumeRendering')
+    animatedVolumeProperty = volumeRenderingNode.GetVolumePropertyNode()
 
-    startVolumeProperty.CopyParameterSet(targetVolumeProperty)
-    endVolumeProperty.CopyParameterSet(targetVolumeProperty)
-
-    endScalarOpacity = endVolumeProperty.GetScalarOpacity()
-    nodeElementCount = 4
-    endValue = [0,]*nodeElementCount
-    endScalarOpacity.GetNodeValue(2, endValue)
-    endValue[0] = 250
-    endValue[1] = 0.25
-    endScalarOpacity.SetNodeValue(2, endValue)
-
-    endColor = endVolumeProperty.GetColor()
-    nodeElementCount = 6
-    endValue = [0.,]*nodeElementCount
-    endColor.GetNodeValue(5, endValue)
-    endValue[0] = 115.
-    endValue[1] = 1.
-    endValue[2] = 1.
-    endValue[3] = 1.
-    endColor.SetNodeValue(5, endValue)
+    startVolumeProperty.CopyParameterSet(animatedVolumeProperty)
+    endVolumeProperty.CopyParameterSet(animatedVolumeProperty)
 
     volumePropertyAction = {
       'name': 'Volume Property',
@@ -359,53 +353,57 @@ class VolumePropertyAction(AnimatorAction):
       'interpolation': 'linear',
       'startVolumePropertyID': startVolumeProperty.GetID(),
       'endVolumePropertyID': endVolumeProperty.GetID(),
-      'targetVolumePropertyID': targetVolumeProperty.GetID(),
+      'animatedVolumePropertyID': animatedVolumeProperty.GetID(),
     }
     return(volumePropertyAction)
 
   def act(self, action, scriptTime):
     startVolumeProperty = slicer.mrmlScene.GetNodeByID(action['startVolumePropertyID'])
     endVolumeProperty = slicer.mrmlScene.GetNodeByID(action['endVolumePropertyID'])
-    targetVolumeProperty = slicer.mrmlScene.GetNodeByID(action['targetVolumePropertyID'])
+    animatedVolumeProperty = slicer.mrmlScene.GetNodeByID(action['animatedVolumePropertyID'])
+
+    # TODO: set only volume in the scene to use animatedVolumeProperty
+    # TODO: animated to animated
+
     if scriptTime <= action['startTime']:
-      targetVolumeProperty.CopyParameterSet(startVolumeProperty)
+      animatedVolumeProperty.CopyParameterSet(startVolumeProperty)
     elif scriptTime >= action['endTime']:
-      targetVolumeProperty.CopyParameterSet(endVolumeProperty)
+      animatedVolumeProperty.CopyParameterSet(endVolumeProperty)
     else:
       actionTime = scriptTime - action['startTime']
       duration = action['endTime'] - action['startTime']
       fraction = actionTime / duration
-      disabledModify = targetVolumeProperty.StartModify()
-      targetVolumeProperty.CopyParameterSet(startVolumeProperty)
+      disabledModify = animatedVolumeProperty.StartModify()
+      animatedVolumeProperty.CopyParameterSet(startVolumeProperty)
       # interpolate the scalar opacity
       startScalarOpacity = startVolumeProperty.GetScalarOpacity()
       endScalarOpacity = endVolumeProperty.GetScalarOpacity()
-      targetScalarOpacity = targetVolumeProperty.GetScalarOpacity()
+      animatedScalarOpacity = animatedVolumeProperty.GetScalarOpacity()
       nodeElementCount = 4
       startValue = [0.,]*nodeElementCount
       endValue = [0.,]*nodeElementCount
-      targetValue = [0.,]*nodeElementCount
+      animatedValue = [0.,]*nodeElementCount
       for index in range(startScalarOpacity.GetSize()):
         startScalarOpacity.GetNodeValue(index, startValue)
         endScalarOpacity.GetNodeValue(index, endValue)
         for i in range(nodeElementCount):
-          targetValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
-        targetScalarOpacity.SetNodeValue(index, targetValue)
+          animatedValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
+        animatedScalarOpacity.SetNodeValue(index, animatedValue)
       # interpolate the color transfer
       startColor = startVolumeProperty.GetColor()
       endColor = endVolumeProperty.GetColor()
-      targetColor = targetVolumeProperty.GetColor()
+      animatedColor = animatedVolumeProperty.GetColor()
       nodeElementCount = 6
       startValue = [0.,]*nodeElementCount
       endValue = [0.,]*nodeElementCount
-      targetValue = [0.,]*nodeElementCount
+      animatedValue = [0.,]*nodeElementCount
       for index in range(startColor.GetSize()):
         startColor.GetNodeValue(index, startValue)
         endColor.GetNodeValue(index, endValue)
         for i in range(nodeElementCount):
-          targetValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
-        targetColor.SetNodeValue(index, targetValue)
-      targetVolumeProperty.EndModify(disabledModify)
+          animatedValue[i] = startValue[i] + fraction * (endValue[i]-startValue[i])
+        animatedColor.SetNodeValue(index, animatedValue)
+      animatedVolumeProperty.EndModify(disabledModify)
 
   def gui(self, action, layout):
     super(VolumePropertyAction,self).gui(action, layout)
@@ -438,24 +436,24 @@ class VolumePropertyAction(AnimatorAction):
     self.endSelector.currentNodeID = action['endVolumePropertyID']
     layout.addRow("End VolumeProperty", self.endSelector)
 
-    self.targetSelector = slicer.qMRMLNodeComboBox()
-    self.targetSelector.nodeTypes = ["vtkMRMLVolumePropertyNode"]
-    self.targetSelector.addEnabled = True
-    self.targetSelector.renameEnabled = True
-    self.targetSelector.removeEnabled = False
-    self.targetSelector.noneEnabled = False
-    self.targetSelector.selectNodeUponCreation = True
-    self.targetSelector.showHidden = True
-    self.targetSelector.showChildNodeTypes = True
-    self.targetSelector.setMRMLScene( slicer.mrmlScene )
-    self.targetSelector.setToolTip( "Pick the target volume property" )
-    self.targetSelector.currentNodeID = action['targetVolumePropertyID']
-    layout.addRow("Target VolumeProperty", self.targetSelector)
+    self.animatedSelector = slicer.qMRMLNodeComboBox()
+    self.animatedSelector.nodeTypes = ["vtkMRMLVolumePropertyNode"]
+    self.animatedSelector.addEnabled = True
+    self.animatedSelector.renameEnabled = True
+    self.animatedSelector.removeEnabled = False
+    self.animatedSelector.noneEnabled = False
+    self.animatedSelector.selectNodeUponCreation = True
+    self.animatedSelector.showHidden = True
+    self.animatedSelector.showChildNodeTypes = True
+    self.animatedSelector.setMRMLScene( slicer.mrmlScene )
+    self.animatedSelector.setToolTip( "Pick the animated volume property" )
+    self.animatedSelector.currentNodeID = action['animatedVolumePropertyID']
+    layout.addRow("Animated VolumeProperty", self.animatedSelector)
 
   def updateFromGUI(self, action):
     action['startVolumePropertyID'] = self.startSelector.currentNodeID
     action['endVolumePropertyID'] = self.endSelector.currentNodeID
-    action['targetVolumePropertyID'] = self.targetSelector.currentNodeID
+    action['animatedVolumePropertyID'] = self.animatedSelector.currentNodeID
 
 
 # add an module-specific dict for any module other to add animator plugins.
@@ -505,6 +503,19 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
+
+  def __init__(self, parent):
+    super(AnimatorWidget,self).__init__(parent)
+    self.sizes = {
+            "160x120": {"width": 160, "height": 120},
+            "320x240": {"width": 320, "height": 240},
+            "640x480": {"width": 640, "height": 480},
+            "1920x1024": {"width": 1920, "height": 1080}}
+    self.defaultSize = "640x480"
+    self.fileFormats = {
+            "GIF": ".gif",
+            "mp4 (H264)": ".mp4"}
+    self.defaultFileFormat = "mp4 (H264)"
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -563,6 +574,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow(self.sequencePlay)
     parametersFormLayout.addRow(self.sequenceSeek)
 
+
     self.actionsMenuButton = qt.QPushButton("Add Action")
     self.actionsMenuButton.enabled = False
     self.actionsMenu = qt.QMenu()
@@ -583,8 +595,38 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     # Layout within the dummy collapsible button
     self.actionsFormLayout = qt.QFormLayout(self.actionsCollapsibleButton)
 
+    #
+    # Export Area
+    #
+    self.exportCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.exportCollapsibleButton.text = "Export"
+    self.layout.addWidget(self.exportCollapsibleButton)
+    self.exportCollapsibleButton.enabled = False
+    self.exportFormLayout = qt.QFormLayout(self.exportCollapsibleButton)
+
+    self.sizeSelector = qt.QComboBox()
+    for size in self.sizes.keys():
+      self.sizeSelector.addItem(size)
+    self.sizeSelector.currentText = self.defaultSize
+    self.exportFormLayout.addRow("Animation size", self.sizeSelector)
+
+    self.fileFormatSelector = qt.QComboBox()
+    for format in self.fileFormats.keys():
+      self.fileFormatSelector.addItem(format)
+    self.fileFormatSelector.currentText = self.defaultFileFormat
+    self.exportFormLayout.addRow("Animation format", self.fileFormatSelector)
+
+    self.outputFileButton = qt.QPushButton("Select a file...")
+    self.exportFormLayout.addRow("Output file", self.outputFileButton)
+
+    self.exportButton = qt.QPushButton("Export")
+    self.exportButton.enabled = False
+    self.exportFormLayout.addRow("", self.exportButton)
+
     # connections
     self.animationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+    self.outputFileButton.connect("clicked()", self.selectExportFile)
+    self.exportButton.connect("clicked()", self.onExport)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -630,6 +672,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       self.actionsFormLayout.addRow(self.animatorActionsGUI.buildGUI())
 
     self.actionsMenuButton.enabled = animationNode != None
+    self.exportCollapsibleButton.enabled = animationNode != None
     self.sequencePlay.setMRMLSequenceBrowserNode(sequenceBrowserNode)
     self.sequenceSeek.setMRMLSequenceBrowserNode(sequenceBrowserNode)
 
@@ -640,6 +683,57 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
       action = actionInstance.defaultAction()
       self.logic.addAction(animationNode, action)
       self.onSelect()
+
+  def selectExportFile(self):
+    self.outputFileButton.text = qt.QFileDialog.getSaveFileName(
+            slicer.util.mainWindow(),
+            "Animation file",
+            "Animation",
+            "")
+    self.exportButton.enabled = self.outputFileButton.text != ""
+
+  def onExport(self):
+
+    # set up the threeDWidget at the correct render size
+    layoutManager = slicer.app.layoutManager()
+    oldLayout = layoutManager.layout
+    threeDWidget = layoutManager.threeDWidget(0)
+    threeDWidget.setParent(None)
+    threeDWidget.show()
+    geometry = threeDWidget.geometry
+    size =  self.sizes[self.sizeSelector.currentText]
+    threeDWidget.setGeometry(geometry.x(), geometry.y(), size["width"], size["height"])
+
+    # set up the animation nodes
+    viewNode = threeDWidget.threeDView().mrmlViewNode()
+    animationNode = self.animationSelector.currentNode()
+    sequenceBrowserNode = slicer.util.getNode(animationNode.GetAttribute('Animator.sequenceBrowserNodeID'))
+    sequenceNodes = vtk.vtkCollection()
+    sequenceBrowserNode.GetSynchronizedSequenceNodes(sequenceNodes, True) # include master
+    sequenceNode = sequenceNodes.GetItemAsObject(0)
+    frameCount = sequenceNode.GetNumberOfDataNodes()
+    tempDir = qt.QTemporaryDir()
+    fileExtension = self.fileFormats[self.fileFormatSelector.currentText]
+
+    # perform the screen capture and video creation
+    from ScreenCapture import ScreenCaptureLogic
+    logic = ScreenCaptureLogic()
+    logic.captureSequence(
+            viewNode,
+            sequenceBrowserNode,
+            0, frameCount-1, frameCount,
+            tempDir.path(),
+            "Slicer-%04d.png")
+    logic.createVideo(
+            60,
+            "-pix_fmt yuv420p",
+            tempDir.path(),
+            "Slicer-%04d.png",
+            self.outputFileButton.text+fileExtension)
+
+    # reset the view
+    layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFinalView) ;# force change
+    layoutManager.setLayout(oldLayout)
 
 
 class AnimatorActionsGUI(object):
@@ -891,7 +985,7 @@ class AnimatorTest(ScriptedLoadableModuleTest):
 
     #actionInstance = slicer.modules.animatorActionPlugins["TranslationAction"]()
     #translationAction = actionInstance.defaultAction()
-    #mrHead.SetAndObserveTransformNodeID(translationAction['targetTransformID'])
+    #mrHead.SetAndObserveTransformNodeID(translationAction['animatedTransformID'])
     # don't add this because it's not a fully worked out example
     # (it does translation only, not full transformation interpolation)
     #logic.addAction(animationNode, translationAction)
