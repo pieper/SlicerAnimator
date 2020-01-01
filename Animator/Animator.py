@@ -702,6 +702,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
     threeDWidget.show()
     geometry = threeDWidget.geometry
     size =  self.sizes[self.sizeSelector.currentText]
+    threeDWidget.threeDController().visible = False
     threeDWidget.setGeometry(geometry.x(), geometry.y(), size["width"], size["height"])
 
     # set up the animation nodes
@@ -732,6 +733,7 @@ class AnimatorWidget(ScriptedLoadableModuleWidget):
             self.outputFileButton.text+fileExtension)
 
     # reset the view
+    threeDWidget.threeDController().visible = True
     layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFinalView) ;# force change
     layoutManager.setLayout(oldLayout)
 
